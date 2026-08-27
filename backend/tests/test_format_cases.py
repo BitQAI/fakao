@@ -111,3 +111,21 @@ def test_bad_file_does_not_abort(tmp_path):
     out = tmp_path / "案例库统一"
     assert main(["--data", str(src), "--out", str(out)]) == 0
     assert (out / "index.csv").exists()
+
+
+def test_derive_keywords_criminal():
+    from format_cases import _derive_keywords
+    kws = _derive_keywords("张某盗窃案", "被告人张某多次入户盗窃，到案后如实供述并退赃，系累犯。",
+                           "人民法院案例库")
+    assert kws[0] == "刑事"
+    assert "盗窃罪" in kws
+    assert "累犯" in kws
+
+
+def test_derive_keywords_civil():
+    from format_cases import _derive_keywords
+    kws = _derive_keywords("李某诉王某房屋租赁合同纠纷案",
+                           "双方因房屋租赁合同履行发生争议，诉至法院，经调解结案。",
+                           "人民法院案例库")
+    assert kws[0] == "民事"
+    assert "房屋租赁合同纠纷" in kws
