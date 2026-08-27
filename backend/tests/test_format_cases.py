@@ -73,7 +73,7 @@ def test_fields_and_clean_text(tmp_path):
     r = records[0]
     assert r["id"] == "case_00001" and r["source"] == "人民法院案例库"
     assert r["case_no"] == "（2026）苏01民终1号"
-    assert r["keywords"] == ["民事", "合同"]
+    assert "民事" in r["keywords"] and "合同" in r["keywords"]
     assert "<p>" not in r["text"] and "案情一" in r["text"]
 
 
@@ -87,7 +87,7 @@ def test_jcy_split_by_guide(tmp_path):
         .read_text(encoding="utf-8").splitlines()
     ]
     assert [r["id"] for r in records] == ["检例第1号", "检例第2号"]
-    assert records[0]["keywords"] == ["故意伤害", "自首"]
+    assert "故意伤害" in records[0]["keywords"] and "自首" in records[0]["keywords"]
 
 
 def test_zgfy_fields(tmp_path):
@@ -101,7 +101,7 @@ def test_zgfy_fields(tmp_path):
     ]
     assert records[0]["id"] == "指导性案例001号"
     assert records[0]["title"] == "居间合同案"
-    assert records[0]["keywords"] == ["民事", "居间合同"]
+    assert "民事" in records[0]["keywords"] and "居间合同" in records[0]["keywords"]
     assert records[0]["category"] == "第1批"
 
 

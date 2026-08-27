@@ -35,6 +35,20 @@ _PROC_TERMS = _ct.PROC_TERMS
 _ADMIN_MARK = _ct.ADMIN_MARK
 _EXEC_MARK = _ct.EXEC_MARK
 
+# 停用词：纯程序/功能词，不进入关键词
+_STOPWORDS = {
+    "法院", "人民", "审理", "认为", "本案", "被告", "原告", "判决", "裁定",
+    "再审", "撤销", "支持", "驳回", "认定", "构成", "行为", "事实",
+    "证据", "应当", "可以", "进行", "提出", "请求", "本院", "一审", "二审",
+    "作出", "涉及", "相关", "规定", "依法", "依照", "符合", "属于", "以及",
+    "或者", "根据", "其他", "起诉", "诉讼", "案件", "情形", "予以", "承担",
+    "部分", "时间", "民事", "刑事", "行政", "执行", "判决书", "裁定书",
+    "公诉", "辩护", "律师", "被告人", "上诉人", "被上诉人", "申请人", "被申请人",
+    "人民法院", "检察院", "公安", "责任", "赔偿", "损失", "数额", "犯罪",
+    "中华人民共和国", "某某", "双方", "一方", "当事人", "情况", "期间", "事项",
+    "内容", "解释", "办理", "约定",
+}
+
 
 def clean_text(raw: str) -> str:
     text = html.unescape(raw or "")
@@ -146,8 +160,31 @@ def _parse_zgfy_batches(dir_: Path, index: list[dict]) -> list[dict]:
     return [_parse_zgfy(p, index) for p in sorted(dir_.glob("指导性案例*.md"))]
 
 
+def _freq_words(text: str, exclude: set[str], limit: int) -> list[str]:
+    """从原文提取高频 2-3 字实词（停用词过滤、去重叠保留长词）。"""
+    counts: dict[str, int] = {}
+    for size in (3, 2):
+        for i in range(len(text) - size + 1):
+            w = text[i:i + size]
+            if not all("\u4e00" <= ch <= "\u9fff" for ch in w):
+                continue
+            if w in _STOPWORDS or w in exclude or "某" in w:
+                continue
+            counts[w] = counts.get(w, 0) + 1
+    kept: list[str] = []
+    for w in sorted(counts, key=lambda x: (-counts[x], -len(x))):
+        if w in exclude:
+            continue
+        if any(w in k or k in w for k in kept):
+            continue
+        kept.append(w)
+        if len(kept) >= limit:
+            break
+    return kept
+
+
 def _derive_keywords(title: str, text: str, source: str) -> list[str]:
-    """关键词为空时，按 标题 + 原文 推导：部门法标签 + 罪名/案由 + 高频概念/程序词。"""
+    """按 标题 + 原文 推导关键词：部门法标签 + 罪名/案由/概念 + 程序词 + 引号短语 + 高频实词。"""
     hay = f"{title}\n{text}"
     cands: list[str] = []
 
@@ -186,6 +223,14 @@ def _derive_keywords(title: str, text: str, source: str) -> list[str]:
     )
     cands.extend(proc)
 
+    # 引号/书名号短语（多为关键概念）
+    for m in re.finditer(r"[「“《]([^」”》]{2,14})[」”》]", hay):
+        phrase = m.group(1).strip()
+        if (phrase and phrase not in cands and phrase not in _STOPWORDS
+                and "中华人民共和国" not in phrase and "某" not in phrase
+                and len(phrase) <= 8):
+            cands.append(phrase)
+
     # 重叠去重（长词优先保留，子串关系只留长者）
     kws: list[str] = []
     for kw in sorted(cands, key=len, reverse=True):
@@ -196,9 +241,12 @@ def _derive_keywords(title: str, text: str, source: str) -> list[str]:
 
     # 部门法标签放最前
     tag = None
-    if (source != "司法部案例库" and any(hit(t) for t, _ in _CRIME_TERMS)) or \
-            "有期徒刑" in text or "判处" in text or "强制医疗" in hay:
+    if "有期徒刑" in text or "判处" in text or "强制医疗" in hay \
+            or (source != "司法部案例库" and any(hit(t) for t, _ in _CRIME_TERMS)):
         tag = "刑事"
+    elif source == "司法部案例库":
+        tag = "刑事" if (any(t in title for t, _ in _CRIME_TERMS)
+                         or ("认罪认罚" in text and "犯罪" in text)) else "民事"
     elif hit("国家赔偿"):
         tag = "国家赔偿"
     elif any(hit(m) for m in _EXEC_MARK):
@@ -212,7 +260,31 @@ def _derive_keywords(title: str, text: str, source: str) -> list[str]:
     if tag:
         kws.insert(0, tag)
 
-    return kws[:6]
+    # 若内容词仍不足，用高频实词补足（排除已用词与部门法标签）
+    used = set(kws)
+    for w in _freq_words(hay, used, 8):
+        kws.append(w)
+        used.add(w)
+
+    return kws[:8]
+
+
+def _enrich_keywords(title: str, text: str, source: str, original: list[str]) -> list[str]:
+    """基于原有关键词补全：保留原词，追加推导词（不重复、不子串重叠）。"""
+    derived = _derive_keywords(title, text, source)
+    merged = list(original)
+    for k in derived:
+        if k in merged:
+            continue
+        if any(k == m or k in m or m in k for m in merged):
+            continue
+        merged.append(k)
+    # 部门法标签（若推导词首位是标签）置顶
+    if derived and derived[0] in ("刑事", "民事", "行政", "执行", "国家赔偿") \
+            and derived[0] in merged:
+        merged.remove(derived[0])
+        merged.insert(0, derived[0])
+    return merged[:8]
 
 
 def main(argv=None) -> int:
@@ -242,8 +314,10 @@ def main(argv=None) -> int:
         index = _read_index(index_path) if index_path else []
         records = fn(data_path, index)
         for r in records:
-            if not r["keywords"]:
-                r["keywords"] = _derive_keywords(r["title"], r["text"], r["source"])
+            joined = " ".join(r["keywords"])
+            if not joined or len(joined) < 30 or len(r["keywords"]) < 4:
+                r["keywords"] = _enrich_keywords(
+                    r["title"], r["text"], r["source"], r["keywords"])
         print(f"OK: {source} {len(records)} 条")
         all_records.extend(records)
 
