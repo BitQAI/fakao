@@ -202,6 +202,7 @@ def today_stats(conn, day: str | None = None) -> dict:
 
 def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict]:
     day = day or date.today().isoformat()
+    ensure_today_plan(conn, day)
     plan = plan_payload(conn, day)
     today_ids = [it["id"] for it in plan["items"]]
     wrong_ids = [

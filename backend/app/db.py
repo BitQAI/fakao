@@ -98,7 +98,9 @@ CREATE TABLE IF NOT EXISTS settings (
 def connect(db_path: Path | None = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path is not None else config.DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # check_same_thread=False：SSE 流式响应（assistant）在事件循环线程写聊天日志，
+    # 同一请求的连接需跨线程复用（每请求独立连接，无并发共享）。
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA_SQL)
