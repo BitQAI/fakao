@@ -26,7 +26,7 @@ export default function SourceViewer({
   source, statute, onClose,
 }: {
   source: SourceTarget | null;
-  statute: string | null;
+  statute?: string | null;
   onClose: () => void;
 }) {
   const [data, setData] = useState<SourceData | null>(null);
