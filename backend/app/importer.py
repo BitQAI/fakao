@@ -14,6 +14,7 @@ KNOWN_TAGS = {"新法", "对比", "数字", "计算", "观点展示", "口诀"}
 MAX_TAGS = 3
 CASE_SOURCES = ("人民法院案例库", "司法部案例库", "最高检指导性案例", "最高法指导性案例")
 MAX_CASES = 3
+MAX_CASE_REFS = 3
 ID_PATTERN = re.compile(r"^(MF|XF|XS|MS|SJ|LL|SG|XZ)-\d{3}$")
 ANCHOR_MIN, ANCHOR_MAX = 16, 36
 CONCLUSION_MAX = 60
@@ -58,6 +59,17 @@ def _case_loc_exists(source: str, loc: str) -> bool:
             )
     _CASE_LOC_CACHE[key] = found
     return found
+
+
+def count_case_refs(entries: list[dict]) -> dict[tuple[str, str], int]:
+    """统计一批条目中各案例 (source, loc) 被引用的次数。"""
+    counts: dict[tuple[str, str], int] = {}
+    for e in entries:
+        for c in e.get("cases") or []:
+            if isinstance(c, dict) and c.get("source") and c.get("loc"):
+                key = (c["source"], c["loc"])
+                counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _validate_cases(e: dict, tag: str) -> list[str]:
@@ -131,12 +143,26 @@ def import_payload(conn, payload: dict) -> dict:
     entries = payload.get("entries", [])
     errors = []
     warnings = []
+    db_rows = conn.execute("SELECT cases FROM entries").fetchall()
+    db_usage = count_case_refs(
+        [{"cases": json.loads(r["cases"] or "[]")} for r in db_rows]
+    )
+    batch_usage = count_case_refs(entries)
     for i, e in enumerate(entries):
         errors.extend(validate_entry(e, i))
         for s in e.get("sources") or []:
             ref = s.get("ref", "")
             if ref and not _find_ref(ref):
                 warnings.append(f"#{i} {e.get('id', '')} 来源文件不存在: {ref}")
+        for c in e.get("cases") or []:
+            if isinstance(c, dict) and c.get("source") and c.get("loc"):
+                key = (c["source"], c["loc"])
+                total = db_usage.get(key, 0) + batch_usage.get(key, 0)
+                if total > MAX_CASE_REFS:
+                    warnings.append(
+                        f"#{i} {e.get('id', '')} 案例引用已达 {total} 次"
+                        f"（上限 {MAX_CASE_REFS}）: {c['source']}#{c['loc']}"
+                    )
     if errors:
         return {"imported": 0, "errors": errors, "warnings": warnings}
     status = payload.get("status", "draft")
