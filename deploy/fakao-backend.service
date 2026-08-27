@@ -1,0 +1,14 @@
+[Unit]
+Description=Fakao Backend (FastAPI)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/fakao/backend
+EnvironmentFile=/opt/fakao/.env
+ExecStart=/opt/fakao/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
