@@ -1,17 +1,15 @@
 """fakao-entry/1.0 侧车 JSON 校验与入库。
 
-规则以 spec 第六节为蓝本裁剪：硬错误整批拒绝，软警告仅记录。
+规则以 spec 2.2 字段表为蓝本：硬错误整批拒绝，软警告仅记录。
 """
 import json
 import re
 from pathlib import Path
 
-from app import config
+from app import config, statutes
 
 SCHEMA_NAME = "fakao-entry/1.0"
-PRIORITIES = {"★", "●", "○"}
-KNOWN_TAGS = {"新法", "对比", "数字", "计算", "观点展示", "口诀"}
-MAX_TAGS = 3
+PRIORITIES = {"高频考点", "易错陷阱", "新增必考", "普通"}
 CASE_SOURCES = ("人民法院案例库", "司法部案例库", "最高检指导性案例", "最高法指导性案例")
 MAX_CASES = 3
 MAX_CASE_REFS = 3
@@ -24,13 +22,14 @@ REQUIRED_KEYS = ("id", "subject", "submodule", "point", "anchor", "conclusion",
 
 INSERT_SQL = """
 INSERT OR REPLACE INTO entries
- (id, subject, submodule, point, anchor, conclusion, priority, tags,
+ (id, subject, submodule, point, anchor, conclusion, priority,
   rationale, sources, cases, statutes, note, tts_text, status)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 _REF_CACHE: dict[str, bool] = {}
-_CASE_LOC_CACHE: dict[tuple[str, str], bool] = {}
+_LOC_CACHE: dict[tuple[str, str], bool] = {}
+_CASE_LOC_CACHE: dict[tuple[str, str], str | None] = {}
 
 
 def _find_ref(ref: str) -> bool:
@@ -39,37 +38,42 @@ def _find_ref(ref: str) -> bool:
         return _REF_CACHE[ref]
     found = False
     if config.SOURCE_DIR.exists():
-        found = any(config.SOURCE_DIR.glob(f"**/{ref}"))
+        found = any(p.is_file() for p in config.SOURCE_DIR.glob(f"**/{ref}"))
     _REF_CACHE[ref] = found
     return found
 
 
-def _case_loc_exists(source: str, loc: str) -> bool:
+def _loc_exists(ref: str, loc: str) -> bool:
+    """loc 摘录文本需在 ref 文件中真实存在（软警告校验）。"""
+    key = (ref, loc)
+    if key in _LOC_CACHE:
+        return _LOC_CACHE[key]
+    found = False
+    if config.SOURCE_DIR.exists():
+        for p in config.SOURCE_DIR.glob(f"**/{ref}"):
+            if p.is_file() and loc in p.read_text(encoding="utf-8-sig"):
+                found = True
+                break
+    _LOC_CACHE[key] = found
+    return found
+
+
+def _case_lookup(source: str, loc: str) -> str | None:
+    """按统一索引查案例标题；不存在返回 None（标题同时供导入补全）。"""
     key = (source, loc)
     if key in _CASE_LOC_CACHE:
         return _CASE_LOC_CACHE[key]
-    found = False
+    title = None
     if config.CASES_INDEX.exists():
         text = config.CASES_INDEX.read_text(encoding="utf-8-sig")
         header = text.splitlines()[0]
         if header.startswith("定位符"):
-            found = any(
-                line.startswith(f"{loc},") and f",{source}," in line
-                for line in text.splitlines()[1:]
-            )
-    _CASE_LOC_CACHE[key] = found
-    return found
-
-
-def count_case_refs(entries: list[dict]) -> dict[tuple[str, str], int]:
-    """统计一批条目中各案例 (source, loc) 被引用的次数。"""
-    counts: dict[tuple[str, str], int] = {}
-    for e in entries:
-        for c in e.get("cases") or []:
-            if isinstance(c, dict) and c.get("source") and c.get("loc"):
-                key = (c["source"], c["loc"])
-                counts[key] = counts.get(key, 0) + 1
-    return counts
+            for line in text.splitlines()[1:]:
+                if line.startswith(f"{loc},") and f",{source}," in line:
+                    title = line.split(",", 3)[2]
+                    break
+    _CASE_LOC_CACHE[key] = title
+    return title
 
 
 def _validate_cases(e: dict, tag: str) -> list[str]:
@@ -84,7 +88,7 @@ def _validate_cases(e: dict, tag: str) -> list[str]:
             continue
         if c["source"] not in CASE_SOURCES:
             errs.append(f"{tag} 案例来源枚举非法: {c['source']!r}")
-        if not _case_loc_exists(c["source"], c["loc"]):
+        if _case_lookup(c["source"], c["loc"]) is None:
             errs.append(f"{tag} 案例不存在于统一索引: {c['source']}#{c['loc']}")
     return errs
 
@@ -97,11 +101,35 @@ def load_payload(path: Path) -> dict:
     return payload
 
 
+def count_case_refs(entries: list[dict]) -> dict[tuple[str, str], int]:
+    """统计一批条目中各案例 (source, loc) 被引用的次数。"""
+    counts: dict[tuple[str, str], int] = {}
+    for e in entries:
+        for c in e.get("cases") or []:
+            if isinstance(c, dict) and c.get("source") and c.get("loc"):
+                key = (c["source"], c["loc"])
+                counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _enrich_cases(e: dict) -> list[dict]:
+    """为 cases 补全 title（按统一索引自动填充，生产无需手写）。"""
+    out = []
+    for c in e.get("cases") or []:
+        item = dict(c)
+        if isinstance(item, dict) and item.get("source") and item.get("loc"):
+            title = _case_lookup(item["source"], item["loc"])
+            if title:
+                item["title"] = title
+        out.append(item)
+    return out
+
+
 def _row(e: dict, status: str) -> tuple:
     return (e["id"], e["subject"], e["submodule"], e["point"], e["anchor"],
-            e["conclusion"], e["priority"], json.dumps(e.get("tags") or [], ensure_ascii=False),
-            e["rationale"], json.dumps(e.get("sources") or [], ensure_ascii=False),
-            json.dumps(e.get("cases") or [], ensure_ascii=False),
+            e["conclusion"], e["priority"], e["rationale"],
+            json.dumps(e.get("sources") or [], ensure_ascii=False),
+            json.dumps(_enrich_cases(e), ensure_ascii=False),
             json.dumps(e.get("statutes") or [], ensure_ascii=False),
             e.get("note"), e.get("tts_text") or "", status)
 
@@ -124,9 +152,6 @@ def validate_entry(e: dict, index: int) -> list[str]:
     conclusion = e.get("conclusion") or ""
     if len(conclusion) > CONCLUSION_MAX or not conclusion.endswith("。"):
         errs.append(f"{tag} 结论句超长或未以句号结尾")
-    tags = e.get("tags") or []
-    if not isinstance(tags, list) or not set(tags) <= KNOWN_TAGS or len(tags) > MAX_TAGS:
-        errs.append(f"{tag} 标签非法: {tags!r}")
     sources = e.get("sources") or []
     if not isinstance(sources, list) or not sources:
         errs.append(f"{tag} 参考来源至少 1 条")
@@ -152,8 +177,14 @@ def import_payload(conn, payload: dict) -> dict:
         errors.extend(validate_entry(e, i))
         for s in e.get("sources") or []:
             ref = s.get("ref", "")
+            loc = s.get("loc", "")
             if ref and not _find_ref(ref):
                 warnings.append(f"#{i} {e.get('id', '')} 来源文件不存在: {ref}")
+            elif ref and loc and not _loc_exists(ref, loc):
+                warnings.append(f"#{i} {e.get('id', '')} 来源摘录文本不存在: {ref}#{loc[:20]}")
+        for st in e.get("statutes") or []:
+            if st and statutes.resolve_statute(st) is None:
+                warnings.append(f"#{i} {e.get('id', '')} 法条无法解析: {st}")
         for c in e.get("cases") or []:
             if isinstance(c, dict) and c.get("source") and c.get("loc"):
                 key = (c["source"], c["loc"])

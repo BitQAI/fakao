@@ -27,6 +27,7 @@ def test_entries_columns(tmp_db):
     conn = db.connect(db_path)
     cols = [r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
     assert {"id", "cases", "tts_text", "status"} <= set(cols)
+    assert "tags" not in cols
 
 
 def test_reviews_check_constraint(tmp_db):
@@ -34,9 +35,9 @@ def test_reviews_check_constraint(tmp_db):
     conn = db.connect(db_path)
     conn.execute(
         "INSERT INTO entries (id, subject, submodule, point, anchor, conclusion, "
-        "priority, tags, rationale, sources, statutes, tts_text, status) "
+        "priority, rationale, sources, statutes, tts_text, status) "
         "VALUES ('XF-001','刑法','分则-财产犯罪','转化型抢劫','甲盗窃后被失主当场扭住，为挣脱反抗将失主打成轻伤',"
-        "'成立抢劫罪。','★','[]','高频','[]','[\"刑法269条\"]','【刑法·转化型抢劫】……','final')"
+        "'成立抢劫罪。','高频考点','高频','[]','[\"刑法269条\"]','【刑法·转化型抢劫】……','final')"
     )
     conn.commit()
     try:

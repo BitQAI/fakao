@@ -31,6 +31,7 @@ DATA_DIR = Path(os.getenv("FAKAO_DATA_DIR", str(ROOT_DIR / "data")))
 DB_PATH = DATA_DIR / "fakao.db"
 AUDIO_DIR = DATA_DIR / "audio"
 SOURCE_DIR = DATA_DIR  # 源材料树（data/），检索时按 ref 文件名递归匹配
+STATUTE_DIR = DATA_DIR / "法条库"  # 法条全文库（只读，运行时解析）
 CASES_DIR = DATA_DIR / "案例库统一"
 CASES_DOCS_DIR = CASES_DIR / "documents"
 CASES_INDEX = CASES_DIR / "index.csv"
