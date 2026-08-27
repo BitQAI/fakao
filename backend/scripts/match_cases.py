@@ -7,8 +7,8 @@
     条目  data/entries/*.json
     索引  data/案例库统一/index.csv
     正文  data/案例库统一/documents/<来源库>.jsonl
-仅补 cases 为空的条目；每案最多 3 条案例、每案例全局最多引用 3 次；
---dry-run 只打印报告不写文件。标题由 importer 导入时自动补全。
+仅补 cases 为空的条目；每案最多 3 条案例（字段上限）；每案例全局引用默认不限制，
+可用 --max-refs 设置硬上限；--dry-run 只打印报告不写文件。标题由 importer 导入时自动补全。
 """
 import argparse
 import json
@@ -23,7 +23,6 @@ MIN_SCORE = 6
 MIN_TEXT_HITS = 2
 SPECIFIC_TERM_HIT = 1  # point 命中的考点专用词必须出现在正文
 MAX_CASES_PER_ENTRY = 3
-MAX_REFS_PER_CASE = 3
 
 ALL_TERMS = [*ct.CRIME_TERMS, *ct.CAUSE_TERMS, *ct.CONCEPT_TERMS]
 
@@ -82,6 +81,8 @@ def main(argv=None) -> int:
     ap.add_argument("--entries", default=str(Path(__file__).resolve().parents[2] / "data/entries"))
     ap.add_argument("--index", default=str(Path(__file__).resolve().parents[2] / "data/案例库统一/index.csv"))
     ap.add_argument("--docs", default=str(Path(__file__).resolve().parents[2] / "data/案例库统一/documents"))
+    ap.add_argument("--max-refs", type=int, default=0,
+                    help="单案例全局引用上限（默认 0 = 不限制）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -131,7 +132,7 @@ def main(argv=None) -> int:
                 if len(picked) >= MAX_CASES_PER_ENTRY:
                     break
                 key = (source, loc)
-                if usage.get(key, 0) >= MAX_REFS_PER_CASE:
+                if args.max_refs and usage.get(key, 0) >= args.max_refs:
                     continue
                 picked.append({"source": source, "loc": loc})
                 usage[key] = usage.get(key, 0) + 1

@@ -165,20 +165,3 @@ def test_cases_bad_shape_error(tmp_db):
     errors = importer.validate_entry(e, 0)
     assert any("案例" in msg for msg in errors)
 
-
-def test_case_over_ref_warns(tmp_db, tmp_path, monkeypatch):
-    db_path, _ = tmp_db
-    conn = db.connect(db_path)
-    monkeypatch.setattr(importer.config, "CASES_INDEX",
-                        _write_case_index(tmp_path, ["case_00001,人民法院案例库,甲案\n"]))
-    importer._CASE_LOC_CACHE.clear()
-    case = [{"source": "人民法院案例库", "loc": "case_00001"}]
-    for i in range(3):
-        e = good_entry(i + 1)
-        e["cases"] = case
-        assert importer.import_payload(conn, make_sidecar([e]))["imported"] == 1
-    e = good_entry(9)
-    e["cases"] = case
-    result = importer.import_payload(conn, make_sidecar([e]))
-    assert result["imported"] == 1
-    assert any("案例引用" in w for w in result["warnings"])

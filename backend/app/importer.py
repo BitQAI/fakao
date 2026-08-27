@@ -12,7 +12,6 @@ SCHEMA_NAME = "fakao-entry/1.0"
 PRIORITIES = {"高频考点", "易错陷阱", "新增必考", "普通"}
 CASE_SOURCES = ("人民法院案例库", "司法部案例库", "最高检指导性案例", "最高法指导性案例")
 MAX_CASES = 3
-MAX_CASE_REFS = 3
 ID_PATTERN = re.compile(r"^(MF|XF|XS|MS|SJ|LL|SG|XZ)-\d{3}$")
 ANCHOR_MIN, ANCHOR_MAX = 16, 36
 CONCLUSION_MAX = 60
@@ -168,11 +167,6 @@ def import_payload(conn, payload: dict) -> dict:
     entries = payload.get("entries", [])
     errors = []
     warnings = []
-    db_rows = conn.execute("SELECT cases FROM entries").fetchall()
-    db_usage = count_case_refs(
-        [{"cases": json.loads(r["cases"] or "[]")} for r in db_rows]
-    )
-    batch_usage = count_case_refs(entries)
     for i, e in enumerate(entries):
         errors.extend(validate_entry(e, i))
         for s in e.get("sources") or []:
@@ -185,15 +179,6 @@ def import_payload(conn, payload: dict) -> dict:
         for st in e.get("statutes") or []:
             if st and statutes.resolve_statute(st) is None:
                 warnings.append(f"#{i} {e.get('id', '')} 法条无法解析: {st}")
-        for c in e.get("cases") or []:
-            if isinstance(c, dict) and c.get("source") and c.get("loc"):
-                key = (c["source"], c["loc"])
-                total = db_usage.get(key, 0) + batch_usage.get(key, 0)
-                if total > MAX_CASE_REFS:
-                    warnings.append(
-                        f"#{i} {e.get('id', '')} 案例引用已达 {total} 次"
-                        f"（上限 {MAX_CASE_REFS}）: {c['source']}#{c['loc']}"
-                    )
     if errors:
         return {"imported": 0, "errors": errors, "warnings": warnings}
     status = payload.get("status", "draft")

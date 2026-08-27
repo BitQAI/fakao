@@ -4,8 +4,7 @@
     python scripts/case_usage.py [--max N] [--db PATH]
 
 默认扫描 data/entries/*.json；--db 可叠加 SQLite 中已入库条目的引用。
---max N（默认 3）：单案例引用上限，超过则打印告警并以退出码 1 结束，
-供每批生产前检查，优先改配未引用的案例。
+--max N（默认 0 = 不限制）：设置单案例引用上限，超过则打印告警并以退出码 1 结束。
 """
 import argparse
 import json
@@ -43,7 +42,7 @@ def _entries_from_db(db_path: Path) -> list[dict]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="案例引用次数统计")
-    ap.add_argument("--max", type=int, default=3, help="单案例引用上限（默认 3）")
+    ap.add_argument("--max", type=int, default=0, help="单案例引用上限（默认 0 = 不限制）")
     ap.add_argument("--db", help="额外叠加 SQLite 库中的引用")
     args = ap.parse_args(argv)
 
@@ -55,12 +54,13 @@ def main(argv=None) -> int:
         print("暂无案例引用")
         return 0
     total = sum(counts.values())
-    print(f"共引用 {total} 次，涉及 {len(counts)} 个案例（上限 {args.max} 次/案例）")
+    limit = args.max if args.max else "不限"
+    print(f"共引用 {total} 次，涉及 {len(counts)} 个案例（上限 {limit} 次/案例）")
     over = []
     for (source, loc), n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0][1])):
-        flag = "  <-- 超上限" if n > args.max else ""
+        flag = "  <-- 超上限" if args.max and n > args.max else ""
         print(f"  {n:>3}  {source}#{loc}{flag}")
-        if n > args.max:
+        if args.max and n > args.max:
             over.append((source, loc, n))
     if over:
         print("存在超上限案例，请优先改配未引用案例", file=sys.stderr)
