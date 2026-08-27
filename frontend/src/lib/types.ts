@@ -7,6 +7,7 @@ export interface Source {
 export interface CaseRef {
   source: string;
   loc: string;
+  title?: string;
 }
 
 export interface Entry {
