@@ -27,7 +27,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-DATA_DIR = Path(os.getenv("FAKAO_DATA_DIR", str(BACKEND_DIR / "data")))
+DATA_DIR = Path(os.getenv("FAKAO_DATA_DIR", str(ROOT_DIR / "data")))
 DB_PATH = DATA_DIR / "fakao.db"
 AUDIO_DIR = DATA_DIR / "audio"
 SOURCE_DIR = DATA_DIR  # 源材料树（data/），检索时按 ref 文件名递归匹配
