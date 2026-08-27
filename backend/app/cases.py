@@ -46,6 +46,13 @@ def get_case(conn, source: str, loc: str) -> dict | None:
         "SELECT source, loc, title, category, case_no, keywords, date, url, text "
         "FROM cases WHERE source=? AND loc=?", (source, loc)
     ).fetchone()
+    if row is None and config.CASES_DOCS_DIR.exists():
+        # 文档存在但案例未装载（本地/新库开箱即用）：幂等装载后重查
+        ensure_cases_loaded(conn)
+        row = conn.execute(
+            "SELECT source, loc, title, category, case_no, keywords, date, url, text "
+            "FROM cases WHERE source=? AND loc=?", (source, loc)
+        ).fetchone()
     if row is None:
         return None
     d = dict(row)

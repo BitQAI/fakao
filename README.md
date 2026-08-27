@@ -33,7 +33,14 @@ cd /opt/fakao/backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python scripts/import_entries.py data/entries/*.json
+.venv/bin/python scripts/load_cases.py   # 案例原文查询；见下方「案例数据说明」
 ```
+
+> **案例数据说明**：`data/案例数据/`（约 69MB）与 `data/案例库统一/documents/`
+> 均被 .gitignore 排除。若要使用看背/听学的「案例原文」功能，需在服务器上
+> 上传这两份目录（或仅上传 documents/），再运行
+> `.venv/bin/python scripts/load_cases.py`。不装也不影响其余功能，仅案例原文
+> 显示「原文不可用」。
 
 4. 前端构建（standalone 模式需手动拷贝静态资源）：
 

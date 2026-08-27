@@ -37,3 +37,13 @@ def test_get_case(tmp_db, tmp_path):
     rec = cases.get_case(conn, "人民法院案例库", "case_00001")
     assert rec is not None and rec["title"] == "甲诉乙案" and rec["keywords"] == ["民事"]
     assert cases.get_case(conn, "人民法院案例库", "nope") is None
+
+
+def test_get_case_lazy_loads_when_docs_present(tmp_db, tmp_path, monkeypatch):
+    """案例表为空但 documents 存在时，查询应自动装载（保证本地开箱即用）。"""
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    monkeypatch.setattr(cases.config, "CASES_DOCS_DIR", _seed_jsonl(tmp_path))
+    rec = cases.get_case(conn, "人民法院案例库", "case_00001")
+    assert rec is not None and rec["title"] == "甲诉乙案"
+    assert conn.execute("SELECT COUNT(*) AS n FROM cases").fetchone()["n"] == 1
