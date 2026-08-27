@@ -1,0 +1,189 @@
+"""案例库统一格式化：4 个来源 → index.csv + documents/*.jsonl。
+
+用法：
+    python scripts/format_cases.py [--data DIR] [--out DIR]
+
+默认输入 data/案例数据，默认输出 data/案例库统一。
+输出：
+    index.csv                    元数据（提交入库）
+    documents/<来源库>.jsonl     全文（.gitignore，可再生成）
+幂等：重复运行覆盖输出；单文件解析失败记 stderr 不中断。
+"""
+import argparse
+import csv
+import html
+import json
+import re
+import sys
+from pathlib import Path
+
+CASE_SOURCES = ("人民法院案例库", "司法部案例库", "最高检指导性案例", "最高法指导性案例")
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"[ \t\u3000]+")
+_HEADING_RE = re.compile(r"^##\s*检例第(\d+)号\s*(.*)$", re.MULTILINE)
+_BATCH_RE = re.compile(r"第(\d+)批")
+
+
+def clean_text(raw: str) -> str:
+    text = html.unescape(raw or "")
+    text = _TAG_RE.sub("\n", text)
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def _read_index(index_csv: Path) -> list[dict]:
+    if not index_csv.exists():
+        return []
+    with index_csv.open(encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _parse_rmfy(cases_dir: Path, index: list[dict]) -> list[dict]:
+    url_map = {r.get("id", ""): r.get("url", "") for r in index}
+    records = []
+    for p in sorted(cases_dir.glob("case_*.json")):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8-sig"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN: {p} 解析失败: {exc}", file=sys.stderr)
+            continue
+        records.append({
+            "id": p.stem, "source": "人民法院案例库",
+            "title": d.get("title", ""), "category": d.get("type_name", ""),
+            "case_no": d.get("ajzh", ""), "keywords": d.get("keyword") or [],
+            "date": d.get("zs_date", ""), "url": url_map.get(d.get("id", ""), ""),
+            "text": clean_text(d.get("text", "")),
+        })
+    return records
+
+
+def _parse_sfb(cases_dir: Path, index: list[dict] | None = None) -> list[dict]:
+    records = []
+    for p in sorted(cases_dir.glob("case_*.json")):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8-sig"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN: {p} 解析失败: {exc}", file=sys.stderr)
+            continue
+        records.append({
+            "id": p.stem, "source": "司法部案例库",
+            "title": d.get("title", ""), "category": d.get("type", ""),
+            "case_no": d.get("num", ""), "keywords": [],
+            "date": d.get("date", ""), "url": d.get("url", ""),
+            "text": clean_text(d.get("body", "")),
+        })
+    return records
+
+
+def _section_keywords(text: str, section: str) -> list[str]:
+    m = re.search(rf"【{section}】\s*(.+?)(?:\n\n|【|$)", text, re.S)
+    if not m:
+        return []
+    return [t for t in _WS_RE.split(m.group(1).strip()) if t]
+
+
+def _parse_jcy(batch_md: Path, index: list[dict]) -> list[dict]:
+    batch = (_BATCH_RE.search(batch_md.name) or [None, ""])[1]
+    meta = {r.get("检例编号", ""): r
+            for r in index
+            if (_BATCH_RE.search(r.get("批次", "") or "") or [None, ""])[1] == batch}
+    blocks = _HEADING_RE.split(batch_md.read_text(encoding="utf-8-sig"))
+    records = []
+    for i in range(1, len(blocks), 3):
+        loc = f"检例第{blocks[i].strip()}号"
+        m = meta.get(loc, {})
+        records.append({
+            "id": loc, "source": "最高检指导性案例",
+            "title": blocks[i + 1].strip() or "", "category": f"第{batch}批",
+            "case_no": "", "keywords": _section_keywords(blocks[i + 2], "关键词"),
+            "date": m.get("发布时间", ""), "url": m.get("来源URL", ""),
+            "text": clean_text(blocks[i + 2]),
+        })
+    return records
+
+
+def _parse_jcy_batches(dir_: Path, index: list[dict]) -> list[dict]:
+    records = []
+    for p in sorted(dir_.glob("第*批*.md")):
+        records.extend(_parse_jcy(p, index))
+    return records
+
+
+def _parse_zgfy(md: Path, index: list[dict]) -> dict:
+    num = int(re.search(r"(\d+)", md.stem).group(1))
+    meta = next((r for r in index if str(r.get("编号", "")).strip() == str(num)), {})
+    text = md.read_text(encoding="utf-8-sig")
+    keywords = []
+    for line in text.splitlines():
+        if line.startswith("关键词"):
+            keywords = [t for t in _WS_RE.split(line[len("关键词"):].strip()) if t]
+            break
+    batch = meta.get("批次", "")
+    if batch and not batch.startswith("第"):
+        batch = f"第{batch}批"
+    return {
+        "id": f"指导性案例{num:03d}号", "source": "最高法指导性案例",
+        "title": meta.get("标题", "") or md.stem, "category": batch or f"第{meta.get('批次', '')}批",
+        "case_no": "", "keywords": keywords,
+        "date": meta.get("日期", ""), "url": meta.get("来源URL", ""),
+        "text": clean_text(text),
+    }
+
+
+def _parse_zgfy_batches(dir_: Path, index: list[dict]) -> list[dict]:
+    return [_parse_zgfy(p, index) for p in sorted(dir_.glob("指导性案例*.md"))]
+
+
+def main(argv=None) -> int:
+    repo_root = Path(__file__).resolve().parents[2]
+    ap = argparse.ArgumentParser(description="案例库统一格式化")
+    ap.add_argument("--data", default=str(repo_root / "data/案例数据"))
+    ap.add_argument("--out", default=str(repo_root / "data/案例库统一"))
+    args = ap.parse_args(argv)
+
+    src = Path(args.data)
+    out = Path(args.out)
+    docs = out / "documents"
+    docs.mkdir(parents=True, exist_ok=True)
+
+    jobs = [
+        ("人民法院案例库", _parse_rmfy, src / "人民法院案例库/cases",
+         src / "人民法院案例库/index.csv"),
+        ("司法部案例库", _parse_sfb, src / "司法部案例库/cases", None),
+        ("最高检指导性案例", _parse_jcy_batches, src / "最高检指导性案例",
+         src / "最高检指导性案例/index.csv"),
+        ("最高法指导性案例", _parse_zgfy_batches, src / "最高法指导性案例",
+         src / "最高法指导性案例/index.csv"),
+    ]
+
+    all_records = []
+    for source, fn, data_path, index_path in jobs:
+        index = _read_index(index_path) if index_path else []
+        records = fn(data_path, index)
+        print(f"OK: {source} {len(records)} 条")
+        all_records.extend(records)
+
+    with (out / "index.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["定位符", "来源库", "标题", "类别", "案号", "关键词",
+                         "日期", "url", "文档文件"])
+        for r in all_records:
+            writer.writerow([
+                r["id"], r["source"], r["title"], r["category"], r["case_no"],
+                " ".join(r["keywords"]), r["date"], r["url"],
+                f"documents/{r['source']}.jsonl",
+            ])
+
+    for source in CASE_SOURCES:
+        recs = [r for r in all_records if r["source"] == source]
+        with (docs / f"{source}.jsonl").open("w", encoding="utf-8") as f:
+            for r in recs:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    print(f"OK: 共 {len(all_records)} 条 -> {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
