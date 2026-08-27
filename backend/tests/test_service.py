@@ -65,11 +65,13 @@ def test_quiz_answer_records(tmp_db):
     db_path, _ = tmp_db
     conn = db.connect(db_path)
     seed(conn)
+    service.set_setting(conn, "exam_date", "2026-09-13")
     service.ensure_today_plan(conn, "2026-08-27")
     questions = service.build_daily_quiz(conn, "2026-08-27")
     service.record_quiz_answer(conn, questions[0]["id"], "随便答", False)
     stats = service.today_stats(conn, "2026-08-27")
     assert stats["quiz_total"] == 1 and stats["quiz_correct"] == 0
+    assert stats["days_left"] == 17
 
 
 def test_settings_and_days_left(tmp_db):
@@ -88,6 +90,7 @@ def test_morning_report_reuses_same_day(tmp_db):
     second = service.morning_report(conn, "2026-08-27")
     assert first["id"] == second["id"]
     assert "早上好" in first["content"] or first["content"]
+    assert "新学 5" in first["content"]
 
 
 def test_assistant_context_finds_entry(tmp_db):

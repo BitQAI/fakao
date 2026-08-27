@@ -197,6 +197,7 @@ def today_stats(conn, day: str | None = None) -> dict:
         "quiz_total": quiz["total"], "quiz_correct": quiz["correct"],
         "listen_min": round(listen / 60), "counts": plan["counts"],
         "weak": _weak_submodule(conn) or "暂无",
+        "days_left": days_left(conn, day),
     }
 
 
@@ -291,7 +292,14 @@ def morning_report(conn, day: str | None = None) -> dict | None:
     existing = latest_report(conn, "morning")
     if existing and existing["date"] == day:
         return existing
-    content = ai.generate_morning_report(plan_payload(conn, day), today_stats(conn, day))
+    plan = ensure_today_plan(conn, day)
+    content = ai.generate_morning_report(
+        {**plan,
+         "new_n": plan["counts"]["new"],
+         "review_n": plan["counts"]["review"],
+         "retry_n": plan["counts"]["retry"]},
+        today_stats(conn, day),
+    )
     save_report(conn, day, "morning", content)
     return latest_report(conn, "morning")
 
