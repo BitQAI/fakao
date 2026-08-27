@@ -1,0 +1,29 @@
+# 视觉伴侣临时目录
+.superpowers/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 前端
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# 后端
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 密钥与本地配置
+.env
+.env.local
+
+# 过程文件与运行产物（沿用法考仓库惯例）
+99_过程文件/
+音频/
+状态/
+*.mp3
