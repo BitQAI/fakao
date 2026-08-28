@@ -28,6 +28,7 @@ venv/
 状态/
 *.mp3
 data/fakao.db
+data/audio/
 
 # 案例库（约 7000 份 / 69MB，仅参考资料，不入库）
 data/案例数据/

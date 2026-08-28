@@ -27,6 +27,13 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+TTS_MODELS = [m.strip() for m in os.getenv(
+    "TTS_MODELS",
+    "qwen-tts-latest,qwen-tts,qwen-tts-2025-05-22,qwen-tts-2025-04-10",
+).split(",") if m.strip()]
+TTS_VOICE = os.getenv("TTS_VOICE", "Ethan")
+
 DATA_DIR = Path(os.getenv("FAKAO_DATA_DIR", str(ROOT_DIR / "data")))
 DB_PATH = DATA_DIR / "fakao.db"
 AUDIO_DIR = DATA_DIR / "audio"

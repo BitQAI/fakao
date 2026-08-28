@@ -15,4 +15,5 @@ def get_audio(entry_id: str, conn=Depends(db.get_db)):
     path = tts.ensure_mp3(entry_id, row["tts_text"])
     if not path.exists():
         raise HTTPException(503, "音频生成中，请稍后重试")
-    return FileResponse(path, media_type="audio/mpeg")
+    media_type = "audio/wav" if path.suffix == ".wav" else "audio/mpeg"
+    return FileResponse(path, media_type=media_type)

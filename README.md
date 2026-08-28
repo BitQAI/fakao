@@ -24,6 +24,7 @@ git clone <你的仓库地址> /opt/fakao
 cd /opt/fakao
 cp .env.example .env
 vi .env   # 填入 DEEPSEEK_API_KEY
+          # 听学 TTS 另填 DASHSCOPE_API_KEY（千问 qwen3-tts-instruct-flash，音色 Neil）
 ```
 
 3. 后端安装与导入数据：

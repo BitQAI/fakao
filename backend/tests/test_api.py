@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -58,7 +60,7 @@ def test_today(client):
 def test_settings_roundtrip(client):
     r = client.put("/api/settings", json={"exam_date": "2026-09-13", "capacity_max": 80})
     assert r.status_code == 200
-    assert r.json()["days_left"] == 17
+    assert r.json()["days_left"] == (date(2026, 9, 13) - date.today()).days
     assert r.json()["capacity_max"] == 80
 
 
@@ -105,6 +107,17 @@ def test_assistant_streams_fallback(client):
 
 def test_audio_missing_entry_404(client):
     assert client.get("/api/audio/NOPE-001").status_code == 404
+
+
+def test_audio_returns_wav(client, tmp_path, monkeypatch):
+    from app import tts
+    wav = tmp_path / "XF-001.wav"
+    wav.write_bytes(b"RIFFfakewav")
+    monkeypatch.setattr(tts, "ensure_mp3", lambda *a, **k: wav)
+    r = client.get("/api/audio/XF-001")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "audio/wav"
+    assert r.content == b"RIFFfakewav"
 
 
 def test_source_file_found(client, tmp_path, monkeypatch):
