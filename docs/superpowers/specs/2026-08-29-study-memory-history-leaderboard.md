@@ -76,6 +76,14 @@
 - 报告页 segments 扩为：复盘 / 覆盖 / 历史 / 排行（BottomNav 不动，入口集中）。
 - 备选方案：放入学习页或新增底部 tab；移动端底部 5 tab 拥挤、学习页 segment 已达 3 个，故选报告页。
 
+### 3.6 看背进度记忆（2026-08-30 补充）
+
+- 与听学同构：`FlashcardView` 用 localStorage 持久化队列条目 id 数组 + 当前 idx（key `fakao.read.queue.v1`）。
+- 恢复规则：刷新后取**公共前缀**匹配——今日计划不变时精确恢复位置；「继续」追加的条目刷新后不存在时回退到计划末尾（公共前缀长度）；跨天/计划变化无公共前缀则从第 1 条开始。
+- 今日已看标记：`plan_payload` / `continue_plan_entries` / `custom_entries` 每条目返回 `reviewed_today`（当天是否有 `mode='read'` 记录），卡片标题显示「今日已看」徽标。
+- 进度行：`第 N / M · 完成 D 张 · 今日已完成 T 条`（T = 后端标记 + 本次会话新评分即时累加）。
+- 深链 `?entry=ID` 已有（目标置首），不参与位置恢复。
+
 ## 4. 数据模型
 
 无变更。全部复用现有 `reviews` / `entries` 表。

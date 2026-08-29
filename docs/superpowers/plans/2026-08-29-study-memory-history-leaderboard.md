@@ -51,6 +51,17 @@
 - [ ] Playwright：看背评分流程、听学刷新恢复、历史页、排行榜页、深链跳转
 - [ ] 代码行数自查（< 300/组件、< 500 文件硬上限）
 
+## Task 6：看背进度记忆（2026-08-30 补充）
+
+**文件**：`backend/app/service.py`、`backend/tests/test_reviews.py`、`frontend/src/components/FlashcardView.tsx`、`frontend/src/lib/types.ts`
+
+- [ ] `service._attach_reviewed_today(conn, items, day)`：批量标记今日已看
+- [ ] `plan_payload` / `continue_plan_entries` / `custom_entries` 三处接入
+- [ ] FlashcardView：localStorage 队列位置恢复（公共前缀回退）
+- [ ] 「今日已看」徽标 + 进度行「今日已完成 T 条」+ 评分后即时累加
+- [ ] 单测：review 后 plan 条目 `reviewed_today=True`
+- [ ] Playwright：刷新恢复位置、已看标记、继续后刷新回退计划末尾
+
 ## 执行顺序
 
-Task 1 → 2 → 3 → 4 → 5；完成后用户确认再提交（git commit 需用户明确同意）。
+Task 1 → 2 → 3 → 4 → 5 → 6；完成后用户确认再提交（git commit 需用户明确同意）。
