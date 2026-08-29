@@ -133,3 +133,11 @@ def test_listen_marks_heard(client):
     assert by_id["XF-001"]["last_ts"] is None
     # 未听优先：XF-001 应在 MF-001 前面
     assert data["items"][0]["id"] == "XF-001"
+
+
+def test_plan_marks_reviewed_today(client):
+    plan = client.get("/api/plans/today").json()
+    assert plan["items"][0]["reviewed_today"] is False
+    _review(client, "XF-001", "read", "good")
+    plan2 = client.get("/api/plans/today").json()
+    assert plan2["items"][0]["reviewed_today"] is True

@@ -28,6 +28,7 @@ export interface Entry {
   read_count?: number;
   listen_count?: number;
   last_ts?: string | null;
+  reviewed_today?: boolean;
 }
 
 export interface Plan {

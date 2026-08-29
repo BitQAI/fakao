@@ -2,9 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getJson, postJson } from "@/lib/api";
+import { readSavedQueue, writeSavedQueue } from "@/lib/progressStore";
 import type { Entry, Plan } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
+
+const READ_STORE_KEY = "fakao.read.queue.v1";
 
 export default function FlashcardView() {
   const searchParams = useSearchParams();
@@ -15,6 +18,7 @@ export default function FlashcardView() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [reviewedToday, setReviewedToday] = useState<Set<string>>(new Set());
   const [continueCount, setContinueCount] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -27,7 +31,11 @@ export default function FlashcardView() {
     const entryParam = searchParams.get("entry");
     getJson<Plan>("/api/plans/today")
       .then((p) => {
-        if (!entryParam) { setPlan(p); return; }
+        setReviewedToday(new Set(p.items.filter((i) => i.reviewed_today).map((i) => i.id)));
+        if (!entryParam) {
+          restoreQueue(p);
+          return;
+        }
         // 深链：目标条目置首，其余沿用今日计划（去重）
         getJson<Entry>(`/api/entries/${encodeURIComponent(entryParam)}`)
           .then((e) => {
@@ -38,10 +46,32 @@ export default function FlashcardView() {
             });
             setIndex(0);
           })
-          .catch(() => setPlan(p));
+          .catch(() => restoreQueue(p));
       })
       .catch((e) => setError(String(e)));
   }, [searchParams]);
+
+  // 队列位置持久化：刷新/离开后回来可恢复
+  useEffect(() => {
+    if (!plan || plan.items.length === 0) return;
+    writeSavedQueue(READ_STORE_KEY, plan.items.map((i) => i.id), index);
+  }, [plan, index]);
+
+  function restoreQueue(p: Plan) {
+    const saved = readSavedQueue(READ_STORE_KEY);
+    let startIdx = 0;
+    if (saved && saved.ids.length) {
+      // 公共前缀：今日计划不变时精确恢复；「继续」追加的条目刷新后丢失时回退到计划末尾
+      let common = 0;
+      while (common < saved.ids.length && common < p.items.length &&
+             saved.ids[common] === p.items[common].id) {
+        common++;
+      }
+      if (common > 0) startIdx = Math.min(saved.idx, common);
+    }
+    setPlan(p);
+    setIndex(startIdx);
+  }
 
   if (error) return <p className="muted">加载失败：{error}</p>;
   if (!plan) return <p className="muted">加载中…</p>;
@@ -54,7 +84,9 @@ export default function FlashcardView() {
     return (
       <div className="card center">
         <h2>{customMode ? "自定义范围已学完" : "今日卡片已看完"}</h2>
-        <p className="muted">共 {items.length} 张，已记录自评。</p>
+        <p className="muted">
+          共 {items.length} 张 · 今日累计 {reviewedToday.size} 条，已记录自评。
+        </p>
         {customMode ? (
           <div className="row">
             <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
@@ -102,6 +134,7 @@ export default function FlashcardView() {
         date: "", quota: r.items.length, rationale: "自定义范围",
         items: r.items, counts: { retry: 0, review: 0, new: r.items.length },
       });
+      setReviewedToday(new Set(r.items.filter((i) => i.reviewed_today).map((i) => i.id)));
       setIndex(0);
       setDone(0);
       setFlipped(false);
@@ -121,6 +154,11 @@ export default function FlashcardView() {
       const r = await postJson<{ items: Entry[] }>("/api/plans/continue", { count });
       if (!r.items.length) return;
       setPlan((p) => (p ? { ...p, items: [...p.items, ...r.items] } : p));
+      setReviewedToday((prev) => {
+        const next = new Set(prev);
+        r.items.forEach((it) => { if (it.reviewed_today) next.add(it.id); });
+        return next;
+      });
       setIndex(items.length);
     } catch (e) {
       setError(String(e));
@@ -140,6 +178,7 @@ export default function FlashcardView() {
         entry_id: entry.id, mode: "read", result, duration_sec: duration,
       });
       startRef.current = Date.now();
+      setReviewedToday((prev) => new Set(prev).add(entry.id));
       setFlipped(false);
       setDone((d) => d + 1);
       setIndex((i) => i + 1);
@@ -170,14 +209,19 @@ export default function FlashcardView() {
       </div>
       {notice && <p className="muted">{notice}</p>}
       <p className="muted">
-        {index + 1} / {items.length} · 完成 {done} 张
+        {index + 1} / {items.length} · 本次完成 {done} 张 · 今日累计 {reviewedToday.size} 条
         {entry.read_count ? ` · 本条已看 ${entry.read_count} 次` : ""}
       </p>
       <div className={`flashcard${flipped ? " flipped" : ""}`} onClick={() => setFlipped((f) => !f)}>
         <div className="flashcard-inner">
           <div className="flashcard-face">
             <span className="tag">{entry.subject} · {entry.submodule}</span>
-            <h2>{entry.point}</h2>
+            <h2>
+              {entry.point}
+              {(entry.reviewed_today || reviewedToday.has(entry.id)) && (
+                <span className="badge">今日已看</span>
+              )}
+            </h2>
             <p>{entry.anchor}</p>
             <p className="hint">点卡片看结论</p>
           </div>
