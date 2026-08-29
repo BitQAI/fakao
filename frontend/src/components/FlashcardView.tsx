@@ -1,17 +1,20 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getJson, postJson } from "@/lib/api";
 import type { Entry, Plan } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 
 export default function FlashcardView() {
+  const searchParams = useSearchParams();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [done, setDone] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [continueCount, setContinueCount] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -21,10 +24,24 @@ export default function FlashcardView() {
   const startRef = useRef(Date.now());
 
   useEffect(() => {
+    const entryParam = searchParams.get("entry");
     getJson<Plan>("/api/plans/today")
-      .then(setPlan)
+      .then((p) => {
+        if (!entryParam) { setPlan(p); return; }
+        // 深链：目标条目置首，其余沿用今日计划（去重）
+        getJson<Entry>(`/api/entries/${encodeURIComponent(entryParam)}`)
+          .then((e) => {
+            setPlan({
+              date: p.date, quota: p.quota, rationale: p.rationale,
+              items: [e, ...p.items.filter((i) => i.id !== e.id)],
+              counts: p.counts,
+            });
+            setIndex(0);
+          })
+          .catch(() => setPlan(p));
+      })
       .catch((e) => setError(String(e)));
-  }, []);
+  }, [searchParams]);
 
   if (error) return <p className="muted">加载失败：{error}</p>;
   if (!plan) return <p className="muted">加载中…</p>;
@@ -114,14 +131,23 @@ export default function FlashcardView() {
   }
 
   async function rate(result: "good" | "fuzzy" | "bad") {
-    const duration = Math.round((Date.now() - startRef.current) / 1000);
-    await postJson("/api/reviews", {
-      entry_id: entry.id, mode: "read", result, duration_sec: duration,
-    });
-    startRef.current = Date.now();
-    setFlipped(false);
-    setDone((d) => d + 1);
-    setIndex((i) => i + 1);
+    if (submitting) return;
+    setSubmitting(true);
+    setNotice("");
+    try {
+      const duration = Math.round((Date.now() - startRef.current) / 1000);
+      await postJson("/api/reviews", {
+        entry_id: entry.id, mode: "read", result, duration_sec: duration,
+      });
+      startRef.current = Date.now();
+      setFlipped(false);
+      setDone((d) => d + 1);
+      setIndex((i) => i + 1);
+    } catch (e) {
+      setNotice("评分保存失败，请重试：" + String(e));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function askAi() {
@@ -143,7 +169,10 @@ export default function FlashcardView() {
         )}
       </div>
       {notice && <p className="muted">{notice}</p>}
-      <p className="muted">{index + 1} / {items.length} · 完成 {done} 张</p>
+      <p className="muted">
+        {index + 1} / {items.length} · 完成 {done} 张
+        {entry.read_count ? ` · 本条已看 ${entry.read_count} 次` : ""}
+      </p>
       <div className={`flashcard${flipped ? " flipped" : ""}`} onClick={() => setFlipped((f) => !f)}>
         <div className="flashcard-inner">
           <div className="flashcard-face">
@@ -196,9 +225,12 @@ export default function FlashcardView() {
       </div>
       {flipped && (
         <div className="rate-row">
-          <button className="btn btn-bad" onClick={() => rate("bad")}>没记住</button>
-          <button className="btn btn-ghost" onClick={() => rate("fuzzy")}>模糊</button>
-          <button className="btn btn-good" onClick={() => rate("good")}>记住了</button>
+          <button className="btn btn-bad" disabled={submitting}
+            onClick={() => rate("bad")}>没记住</button>
+          <button className="btn btn-ghost" disabled={submitting}
+            onClick={() => rate("fuzzy")}>模糊</button>
+          <button className="btn btn-good" disabled={submitting}
+            onClick={() => rate("good")}>{submitting ? "保存中…" : "记住了"}</button>
         </div>
       )}
       <SourceViewer

@@ -85,7 +85,9 @@ body {
   background: var(--card); border: 1px solid var(--line); border-radius: 14px;
   padding: 20px; display: flex; flex-direction: column; gap: 10px;
 }
-.flashcard-face.back { transform: rotateY(180deg); }
+.flashcard-face.back { transform: rotateY(180deg); pointer-events: none; }
+.flashcard.flipped .flashcard-face { pointer-events: none; }
+.flashcard.flipped .flashcard-face.back { pointer-events: auto; }
 .hint { color: var(--muted); font-size: 12px; margin-top: auto; text-align: center; }
 .tag { font-size: 12px; color: var(--primary); }
 .note { color: var(--bad); font-size: 13px; }
