@@ -17,11 +17,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import ai, config, importer, statutes  # noqa: E402
+from app import ai, config, db, importer, statutes  # noqa: E402
 
 SUBJECT_PREFIX = {
     "刑法": "XF", "民法": "MF", "刑诉": "XS", "民诉": "MS",
-    "商经知": "SJ", "理论法": "LL", "三国法": "SG",
+    "商经知": "SJ", "理论法": "LL", "三国法": "SG", "行政法": "XZ",
 }
 _BLOCK_RE = re.compile(r"(?m)(^#{2,4} |^## 【)")
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$")
@@ -41,6 +41,61 @@ def split_blocks(text: str) -> list[str]:
         if len(block) > 20:
             blocks.append(block)
     return blocks
+
+
+def load_blocks(subject: str) -> list[tuple[str, str]]:
+    """读取科目资料全部块，返回 [(文件名, 块文本)]。"""
+    subject_dir = config.DATA_DIR / "科目资料" / subject
+    blocks: list[tuple[str, str]] = []
+    for md in sorted(subject_dir.glob("*.md")):
+        text = md.read_text(encoding="utf-8-sig")
+        blocks.extend((md.name, b) for b in split_blocks(text))
+    return blocks
+
+
+def uncovered_blocks(subject: str,
+                     entries: list[dict] | None = None) -> list[tuple[str, str]]:
+    """返回未被任何条目 sources.loc 引用的资料块（文件名, 块文本）。
+
+    entries 传条目字典列表（取各自 sources）；缺省时从 DB 读 final 条目。
+    """
+    blocks = load_blocks(subject)
+    if entries is None:
+        conn = db.connect()
+        rows = conn.execute(
+            "SELECT sources FROM entries WHERE subject=? AND status='final'",
+            (subject,)).fetchall()
+        conn.close()
+        entries = [{"sources": json.loads(r["sources"])} for r in rows]
+    covered: set[int] = set()
+    for e in entries:
+        for s in e.get("sources") or []:
+            ref, loc = s.get("ref", ""), s.get("loc", "")
+            if not ref or not loc:
+                continue
+            nloc = _norm(loc)
+            if not nloc:
+                continue
+            for i, (fname, block) in enumerate(blocks):
+                if fname == ref and nloc in _norm(block):
+                    covered.add(i)
+                    break
+    return [b for i, b in enumerate(blocks) if i not in covered]
+
+
+_META_HEAD = re.compile(r"复习|建议|口诀|速记|附录|清单|提示|备考|索引|"
+                        r"来源|考情|导引|总览|变化对照")
+
+
+def gap_blocks(subject: str,
+               entries: list[dict] | None = None) -> list[tuple[str, str]]:
+    """定向补缺用：未被引用的资料块中，剔除复习建议/口诀/速记等元信息节。"""
+    out = []
+    for ref, block in uncovered_blocks(subject, entries):
+        head = block.splitlines()[0] if block.splitlines() else ""
+        if not _META_HEAD.search(head):
+            out.append((ref, block))
+    return out
 
 
 def parse_entries(text: str) -> list[dict] | None:
@@ -164,15 +219,12 @@ def _build_prompt(chunk: list[tuple[str, str]]) -> str:
 
 
 def generate(subject: str, target: int = 0, batch: int = 5,
-             out_path: Path | None = None, retries: int = 2) -> dict:
-    subject_dir = config.DATA_DIR / "科目资料" / subject
+             out_path: Path | None = None, retries: int = 2,
+             blocks: list[tuple[str, str]] | None = None) -> dict:
     out_path = Path(out_path) if out_path else config.DATA_DIR / "entries" / f"{subject}.json"
     prefix = SUBJECT_PREFIX[subject]
 
-    blocks: list[tuple[str, str]] = []
-    for md in sorted(subject_dir.glob("*.md")):
-        text = md.read_text(encoding="utf-8-sig")
-        blocks.extend((md.name, b) for b in split_blocks(text))
+    blocks = blocks if blocks is not None else load_blocks(subject)
 
     existing: list[dict] = []
     if out_path.exists():
@@ -233,7 +285,7 @@ def generate(subject: str, target: int = 0, batch: int = 5,
         out_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema": "fakao-entry/1.0",
-            "source_md": str(subject_dir),
+            "source_md": str(config.DATA_DIR / "科目资料" / subject),
             "status": "draft",
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "count": len(existing) + len(new_entries),
@@ -250,10 +302,13 @@ def generate(subject: str, target: int = 0, batch: int = 5,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="按科目资料批量生成法考条目 draft")
-    ap.add_argument("--subject", required=True, help="科目名（刑法/民法/刑诉/民诉/商经知/理论法/三国法）")
+    ap.add_argument("--subject", required=True,
+                    help="科目名（刑法/民法/刑诉/民诉/商经知/理论法/三国法/行政法）")
     ap.add_argument("--target", type=int, default=0, help="目标新增条数（0=跑完所有资料块）")
     ap.add_argument("--batch", type=int, default=5)
     ap.add_argument("--out", default=None, help="输出 JSON 路径")
+    ap.add_argument("--gaps", action="store_true",
+                    help="只生成未被任何条目 sources 引用的资料块")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -261,12 +316,15 @@ def main(argv=None) -> int:
         print(f"未知科目: {args.subject}", file=sys.stderr)
         return 2
     if args.dry_run:
-        subject_dir = config.DATA_DIR / "科目资料" / args.subject
-        for md in sorted(subject_dir.glob("*.md")):
-            blocks = split_blocks(md.read_text(encoding="utf-8-sig"))
-            print(f"{md.name}: {len(blocks)} 块")
+        blocks = gap_blocks(args.subject) if args.gaps else load_blocks(args.subject)
+        from collections import Counter
+        per_file = Counter(f for f, _ in blocks)
+        for name, n in per_file.items():
+            print(f"{name}: {n} 块")
         return 0
-    stats = generate(args.subject, target=args.target, batch=args.batch, out_path=args.out)
+    blocks = gap_blocks(args.subject) if args.gaps else None
+    stats = generate(args.subject, target=args.target, batch=args.batch,
+                     out_path=args.out, blocks=blocks)
     print(f"汇总: {stats}")
     return 1 if stats["fail"] else 0
 

@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from app import config, db, importer, tts  # noqa: E402
 import generate_entries as gen  # noqa: E402
 
-SUBJECT_ORDER = ["民诉", "商经知", "理论法", "三国法", "刑法", "民法"]
+SUBJECT_ORDER = ["民诉", "商经知", "理论法", "三国法", "刑法", "民法", "行政法"]
 SUBJECT_TARGET = 150
 SUBJECT_PREFIX = gen.SUBJECT_PREFIX
 

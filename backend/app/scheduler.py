@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 
 PRIORITY_ORDER = {"高频考点": 0, "易错陷阱": 1, "新增必考": 2, "普通": 3}
-SUBJECT_ORDER = ("刑法", "民法", "刑诉", "民诉", "商经知", "理论法", "三国法")
+SUBJECT_ORDER = ("刑法", "民法", "刑诉", "民诉", "商经知", "理论法", "三国法", "行政法")
 
 
 @dataclass(frozen=True)

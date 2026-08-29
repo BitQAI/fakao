@@ -13,10 +13,13 @@ from generate_entries import (  # noqa: E402
     fix_loc,
     fix_rationale,
     fix_tts,
+    gap_blocks,
     generate,
+    load_blocks,
     next_id,
     parse_entries,
     split_blocks,
+    uncovered_blocks,
 )
 
 
@@ -33,6 +36,77 @@ def test_split_blocks_by_heading():
     assert len(blocks) == 3
     assert blocks[0].startswith("### 考点1")
     assert blocks[2].startswith("## 【易错点1】")
+
+
+def test_load_blocks_returns_ref_and_text(monkeypatch, tmp_path):
+    subject_dir = tmp_path / "科目资料" / "刑诉"
+    subject_dir.mkdir(parents=True)
+    (subject_dir / "刑诉-高频考点.md").write_text(
+        "# 刑诉\n### 考点1：无罪推定\n内容一内容一内容一内容一内容一。\n"
+        "### 考点2：管辖\n内容二内容二内容二内容二内容二。\n", encoding="utf-8")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    blocks = load_blocks("刑诉")
+    assert len(blocks) == 2
+    assert blocks[0][0] == "刑诉-高频考点.md"
+    assert blocks[0][1].startswith("### 考点1")
+
+
+def test_uncovered_blocks_marks_only_cited(monkeypatch, tmp_path):
+    subject_dir = tmp_path / "科目资料" / "刑诉"
+    subject_dir.mkdir(parents=True)
+    (subject_dir / "刑诉-高频考点.md").write_text(
+        "### 考点1：无罪推定\n原文句子一。内容足够长以通过分块过滤。\n"
+        "### 考点2：管辖\n原文句子二。内容足够长以通过分块过滤。\n", encoding="utf-8")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    entries = [{"sources": [{"ref": "刑诉-高频考点.md", "loc": "原文句子一"}]}]
+    gaps = uncovered_blocks("刑诉", entries)
+    assert len(gaps) == 1
+    assert gaps[0][1].startswith("### 考点2")
+
+
+def test_gap_blocks_filters_meta_sections(monkeypatch, tmp_path):
+    subject_dir = tmp_path / "科目资料" / "刑诉"
+    subject_dir.mkdir(parents=True)
+    (subject_dir / "刑诉-高频考点.md").write_text(
+        "### 考点1：无罪推定\n原文句子一。内容足够长以通过分块过滤。\n"
+        "## 四、复习建议\n建议内容建议内容建议内容建议内容建议内容建议内容。\n"
+        "### 考点2：管辖\n原文句子二。内容足够长以通过分块过滤。\n", encoding="utf-8")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    gaps = gap_blocks("刑诉", [])
+    assert len(gaps) == 2
+    assert all("复习建议" not in b[1] for b in gaps)
+
+
+def test_generate_uses_provided_blocks_only(monkeypatch, tmp_path):
+    subject_dir = tmp_path / "科目资料" / "刑诉"
+    subject_dir.mkdir(parents=True)
+    (subject_dir / "刑诉-高频考点.md").write_text(
+        "### 考点1：无罪推定\n原文句子一。内容足够长以通过分块过滤。\n"
+        "### 考点2：管辖\n原文句子二。内容足够长以通过分块过滤。\n", encoding="utf-8")
+    entry = {
+        "subject": "刑诉", "submodule": "基本原则", "point": "无罪推定",
+        "anchor": "甲被检察院作存疑不起诉，是否属确定有罪",
+        "conclusion": "不起诉不是确定有罪，被不起诉人无罪。",
+        "priority": "高频考点", "rationale": "高频",
+        "sources": [{"type": "高频", "ref": "刑诉-高频考点.md", "loc": "原文句子一"}],
+        "statutes": [], "note": None,
+        "tts_text": "【刑诉·无罪推定】甲被不起诉，无罪。",
+    }
+    seen = {}
+
+    def fake_call_llm(system, user, **k):
+        seen["user"] = user
+        return json.dumps([{**entry, "id": "XS-001"}], ensure_ascii=False)
+
+    monkeypatch.setattr(ai, "call_llm", fake_call_llm)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "SOURCE_DIR", tmp_path)
+    out = tmp_path / "刑诉.json"
+    only = load_blocks("刑诉")[:1]
+    stats = generate("刑诉", out_path=out, batch=1, blocks=only)
+    assert stats["ok"] == 1
+    assert "考点2" not in seen["user"]  # 未提供的块不进入提示词
+    assert "考点1" in seen["user"]
 
 
 def test_parse_entries_ok():

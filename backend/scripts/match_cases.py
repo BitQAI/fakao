@@ -26,6 +26,35 @@ MAX_CASES_PER_ENTRY = 3
 
 ALL_TERMS = [*ct.CRIME_TERMS, *ct.CAUSE_TERMS, *ct.CONCEPT_TERMS]
 
+# 指导性案例领域（关键词首段）→ 允许挂接的科目；三国法仅限涉外民商子科
+_DOMAIN_SUBJECTS = {
+    "刑事": {"刑法", "刑诉"},
+    "民事": {"民法", "民诉", "商经知"},
+    "知识产权": {"商经知"},
+    "行政": {"行政法"},
+    "国家赔偿": {"行政法"},
+}
+_PRIVATE_INTL_SUBS = ("国际私法", "国际经济法", "涉外")
+
+
+def case_domain(keywords: str) -> str | None:
+    """从 index 关键词行提取领域（刑事/民事/知识产权/行政/国家赔偿）。"""
+    head = (keywords or "").strip().split()[0] if (keywords or "").strip() else ""
+    for domain in _DOMAIN_SUBJECTS:
+        if head.startswith(domain):
+            return domain
+    return None
+
+
+def subject_allows_domain(subject: str, submodule: str, domain: str | None) -> bool:
+    if not domain:
+        return False
+    if subject in _DOMAIN_SUBJECTS[domain]:
+        return True
+    if subject == "三国法" and domain in ("民事", "知识产权"):
+        return submodule.startswith(_PRIVATE_INTL_SUBS)
+    return False
+
 
 def entry_terms(e: dict) -> list[str]:
     """从条目提取考点词：specific=point 字段命中词，all=全字段命中词。"""
@@ -82,9 +111,14 @@ def main(argv=None) -> int:
     ap.add_argument("--index", default=str(Path(__file__).resolve().parents[2] / "data/案例库统一/index.csv"))
     ap.add_argument("--docs", default=str(Path(__file__).resolve().parents[2] / "data/案例库统一/documents"))
     ap.add_argument("--max-refs", type=int, default=0,
-                    help="单案例全局引用上限（默认 0 = 不限制）")
+                     help="单案例全局引用上限（默认 0 = 不限制）")
+    ap.add_argument("--append-guiding", action="store_true",
+                    help="对已有 cases 的条目追加匹配的最高法指导性案例（不去重覆盖，单条上限 3）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
+
+    source_filter = "最高法指导性案例" if args.append_guiding else None
+    max_total = MAX_CASES_PER_ENTRY
 
     index_rows = load_index(Path(args.index))
     texts = load_texts(Path(args.docs))
@@ -103,8 +137,19 @@ def main(argv=None) -> int:
         payload = json.loads(f.read_text(encoding="utf-8-sig"))
         changed = False
         for e in payload.get("entries", []):
-            if e.get("cases"):
+            existing = list(e.get("cases") or [])
+            if existing and not args.append_guiding:
                 continue
+            budget = max_total - len(existing) if args.append_guiding else MAX_CASES_PER_ENTRY
+            if budget <= 0:
+                continue
+            allowed_domains = None
+            if args.append_guiding:
+                allowed_domains = {
+                    d for d, subs in _DOMAIN_SUBJECTS.items()
+                    if subject_allows_domain(e.get("subject", ""),
+                                             e.get("submodule", ""), d)
+                }
             terms, specific = entry_terms(e)
             if not terms:
                 stats["no_terms"] += 1
@@ -112,6 +157,12 @@ def main(argv=None) -> int:
             # 第一轮：关键词/标题粗筛（不读正文）
             cands = []
             for r in index_rows:
+                if source_filter and r["来源库"] != source_filter:
+                    continue
+                if args.append_guiding and allowed_domains is not None:
+                    dom = case_domain(r.get("关键词") or "")
+                    if dom not in allowed_domains:
+                        continue
                 k = sum(1 for t in terms if t in (r.get("关键词") or ""))
                 t = sum(1 for t2 in terms if t2 in r["标题"])
                 if k + t >= 1:
@@ -129,18 +180,21 @@ def main(argv=None) -> int:
             matched.sort(key=lambda x: (-x[0], -x[1], -x[2], x[4]))
             picked = []
             for score, spec_hits, text_hits, source, loc, title in matched:
-                if len(picked) >= MAX_CASES_PER_ENTRY:
+                if len(picked) >= budget:
                     break
                 key = (source, loc)
                 if args.max_refs and usage.get(key, 0) >= args.max_refs:
+                    continue
+                if any(c["source"] == source and c["loc"] == loc for c in existing):
                     continue
                 picked.append({"source": source, "loc": loc})
                 usage[key] = usage.get(key, 0) + 1
             if not picked:
                 stats["no_match"] += 1
-                print(f"NO-MATCH {e['id']} {e['point']} terms={terms[:5]}")
+                if not args.append_guiding:
+                    print(f"NO-MATCH {e['id']} {e['point']} terms={terms[:5]}")
                 continue
-            e["cases"] = picked
+            e["cases"] = existing + picked
             stats["filled"] += 1
             stats["added"] += len(picked)
             changed = True
