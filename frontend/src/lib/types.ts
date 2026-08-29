@@ -67,6 +67,7 @@ export interface ListenPayload {
   items: Entry[];
   remaining: number;
   generating: boolean;
+  custom?: boolean;
 }
 
 export interface QuizQuestion {

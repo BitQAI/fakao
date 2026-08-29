@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getJson, postJson } from "@/lib/api";
 import type { Entry, ListenPayload } from "@/lib/types";
+import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 
 export default function ListenView() {
@@ -12,6 +13,7 @@ export default function ListenView() {
   const [notice, setNotice] = useState("");
   const [moreCount, setMoreCount] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [source, setSource] = useState<SourceTarget | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const durRef = useRef(0);
@@ -28,9 +30,21 @@ export default function ListenView() {
   const items = queue.items;
   if (items.length === 0) {
     return (
-      <div className="card">
-        <p>{queue.generating ? "正在生成更多听学内容…" : "暂无听学内容。"}</p>
-        {queue.remaining === 0 && <p className="muted">剩余不足时系统会自动续批生成。</p>}
+      <div className="page-box">
+        <div className="card">
+          <p>{queue.generating ? "正在生成更多听学内容…" : "暂无听学内容。"}</p>
+          {queue.remaining === 0 && <p className="muted">剩余不足时系统会自动续批生成。</p>}
+          <div className="row">
+            <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
+              自定义范围学习
+            </button>
+          </div>
+        </div>
+        <CustomRangePicker
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onConfirm={(range) => void applyCustom(range)}
+        />
       </div>
     );
   }
@@ -41,31 +55,67 @@ export default function ListenView() {
     return (
       <div className="page-box">
         <div className="card center">
-          <h2>本轮听学完成</h2>
+          <h2>{queue.custom ? "自定义范围已学完" : "本轮听学完成"}</h2>
           <p className="muted">共听了 {items.length} 段 · 剩余可听 {queue.remaining}</p>
-          <div className="continue-box">
-            <p className="muted">继续听？选择数量：</p>
+          {queue.custom ? (
             <div className="row">
-              <button className="btn" disabled={loadingMore}
-                onClick={() => void loadMore(5)}>再听 5 段</button>
-              <button className="btn" disabled={loadingMore}
-                onClick={() => void loadMore(10)}>再听 10 段</button>
+              <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
+                重新选择范围
+              </button>
             </div>
-            <div className="continue-custom">
-              <input
-                type="number" min={1} max={50} placeholder="自定义数量"
-                value={moreCount}
-                onChange={(e) => setMoreCount(e.target.value)}
-              />
-              <button className="btn btn-primary" disabled={loadingMore || !moreCount}
-                onClick={() => void loadMore(Number(moreCount))}>继续</button>
+          ) : (
+            <div className="continue-box">
+              <p className="muted">继续听？选择数量：</p>
+              <div className="row">
+                <button className="btn" disabled={loadingMore}
+                  onClick={() => void loadMore(5)}>再听 5 段</button>
+                <button className="btn" disabled={loadingMore}
+                  onClick={() => void loadMore(10)}>再听 10 段</button>
+              </div>
+              <div className="continue-custom">
+                <input
+                  type="number" min={1} max={50} placeholder="自定义数量"
+                  value={moreCount}
+                  onChange={(e) => setMoreCount(e.target.value)}
+                />
+                <button className="btn btn-primary" disabled={loadingMore || !moreCount}
+                  onClick={() => void loadMore(Number(moreCount))}>继续</button>
+              </div>
+              {notice && <p className="muted">{notice}</p>}
             </div>
-            {notice && <p className="muted">{notice}</p>}
-          </div>
+          )}
         </div>
         <SourceViewer source={source} onClose={() => setSource(null)} />
+        <CustomRangePicker
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onConfirm={(range) => void applyCustom(range)}
+        />
       </div>
     );
+  }
+
+  async function applyCustom(range: CustomRange) {
+    setLoadingMore(true);
+    setNotice("");
+    try {
+      const r = await postJson<ListenPayload>("/api/listen/custom", {
+        subjects: range.subjects, points: range.points,
+      });
+      if (!r.items.length) {
+        setNotice("所选范围暂无听学内容（可能尚未合成音频）。");
+        setPickerOpen(false);
+        return;
+      }
+      setQueue(r);
+      setIdx(0);
+      setPlaying(false);
+      setPickerOpen(false);
+    } catch (e) {
+      setNotice("加载失败：" + String(e));
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function loadMore(count: number) {
@@ -99,6 +149,17 @@ export default function ListenView() {
 
   return (
     <div className="page-box">
+      <div className="mode-row">
+        <button className="btn btn-ghost mode-btn" onClick={() => setPickerOpen(true)}>
+          自定义范围
+        </button>
+        {queue.custom && (
+          <button className="btn btn-ghost mode-btn" onClick={() => setPickerOpen(true)}>
+            重新选择
+          </button>
+        )}
+      </div>
+      {notice && <p className="muted">{notice}</p>}
       <div className="card center">
         <h2>{entry.subject} · {entry.point}</h2>
         <p className="muted">
@@ -141,6 +202,11 @@ export default function ListenView() {
         )}
       </div>
       <SourceViewer source={source} onClose={() => setSource(null)} />
+      <CustomRangePicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onConfirm={(range) => void applyCustom(range)}
+      />
     </div>
   );
 }

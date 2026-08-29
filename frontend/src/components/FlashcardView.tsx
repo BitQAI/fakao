@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getJson, postJson } from "@/lib/api";
 import type { Entry, Plan } from "@/lib/types";
+import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 
 export default function FlashcardView() {
@@ -10,8 +11,11 @@ export default function FlashcardView() {
   const [flipped, setFlipped] = useState(false);
   const [done, setDone] = useState(0);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [continueCount, setContinueCount] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [customMode, setCustomMode] = useState(false);
   const [source, setSource] = useState<SourceTarget | null>(null);
   const [statute, setStatute] = useState<string | null>(null);
   const startRef = useRef(Date.now());
@@ -32,31 +36,66 @@ export default function FlashcardView() {
   if (index >= items.length) {
     return (
       <div className="card center">
-        <h2>今日卡片已看完</h2>
+        <h2>{customMode ? "自定义范围已学完" : "今日卡片已看完"}</h2>
         <p className="muted">共 {items.length} 张，已记录自评。</p>
-        <div className="continue-box">
-          <p className="muted">还想继续学？选择数量：</p>
+        {customMode ? (
           <div className="row">
-            <button className="btn" disabled={loadingMore}
-              onClick={() => void loadMore(5)}>继续 5 个</button>
-            <button className="btn" disabled={loadingMore}
-              onClick={() => void loadMore(10)}>继续 10 个</button>
+            <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
+              重新选择范围
+            </button>
           </div>
-          <div className="continue-custom">
-            <input
-              type="number" min={1} max={50} placeholder="自定义数量"
-              value={continueCount}
-              onChange={(e) => setContinueCount(e.target.value)}
-            />
-            <button className="btn btn-primary" disabled={loadingMore || !continueCount}
-              onClick={() => void loadMore(Number(continueCount))}>继续</button>
+        ) : (
+          <div className="continue-box">
+            <p className="muted">还想继续学？选择数量：</p>
+            <div className="row">
+              <button className="btn" disabled={loadingMore}
+                onClick={() => void loadMore(5)}>继续 5 个</button>
+              <button className="btn" disabled={loadingMore}
+                onClick={() => void loadMore(10)}>继续 10 个</button>
+            </div>
+            <div className="continue-custom">
+              <input
+                type="number" min={1} max={50} placeholder="自定义数量"
+                value={continueCount}
+                onChange={(e) => setContinueCount(e.target.value)}
+              />
+              <button className="btn btn-primary" disabled={loadingMore || !continueCount}
+                onClick={() => void loadMore(Number(continueCount))}>继续</button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
 
   const entry: Entry = items[index];
+
+  async function applyCustom(range: CustomRange) {
+    setLoadingMore(true);
+    setNotice("");
+    try {
+      const r = await postJson<{ items: Entry[] }>("/api/plans/custom", {
+        subjects: range.subjects, points: range.points,
+      });
+      if (!r.items.length) {
+        setNotice("所选范围暂无条目，请重新选择。");
+        return;
+      }
+      setPlan({
+        date: "", quota: r.items.length, rationale: "自定义范围",
+        items: r.items, counts: { retry: 0, review: 0, new: r.items.length },
+      });
+      setIndex(0);
+      setDone(0);
+      setFlipped(false);
+      setCustomMode(true);
+      setPickerOpen(false);
+    } catch (e) {
+      setNotice("加载失败：" + String(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function loadMore(count: number) {
     if (count < 1 || count > 50) return;
@@ -93,6 +132,17 @@ export default function FlashcardView() {
 
   return (
     <div>
+      <div className="mode-row">
+        <button className="btn btn-ghost mode-btn" onClick={() => setPickerOpen(true)}>
+          自定义范围
+        </button>
+        {customMode && (
+          <button className="btn btn-ghost mode-btn" onClick={() => setPickerOpen(true)}>
+            重新选择
+          </button>
+        )}
+      </div>
+      {notice && <p className="muted">{notice}</p>}
       <p className="muted">{index + 1} / {items.length} · 完成 {done} 张</p>
       <div className={`flashcard${flipped ? " flipped" : ""}`} onClick={() => setFlipped((f) => !f)}>
         <div className="flashcard-inner">
@@ -155,6 +205,11 @@ export default function FlashcardView() {
         source={source}
         statute={statute}
         onClose={() => { setSource(null); setStatute(null); }}
+      />
+      <CustomRangePicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onConfirm={(range) => void applyCustom(range)}
       />
     </div>
   );
