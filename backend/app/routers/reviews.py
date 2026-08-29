@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import db, service
+from app import db, review_stats, service
 
 router = APIRouter(prefix="/api", tags=["reviews"])
 
@@ -11,6 +11,24 @@ class ReviewIn(BaseModel):
     mode: str
     result: str
     duration_sec: int = 0
+
+
+@router.get("/reviews/history")
+def get_review_history(limit: int = 100, mode: str | None = None,
+                       conn=Depends(db.get_db)):
+    if mode is not None and mode not in {"read", "listen"}:
+        raise HTTPException(400, "mode 非法")
+    return {"items": review_stats.review_history(
+        conn, limit=min(limit, 500), mode=mode)}
+
+
+@router.get("/leaderboard")
+def get_leaderboard(limit: int = 200, sort: str = "total",
+                    conn=Depends(db.get_db)):
+    if sort not in {"total", "read", "listen"}:
+        raise HTTPException(400, "sort 非法")
+    return {"items": review_stats.leaderboard(
+        conn, limit=min(limit, 500), sort=sort)}
 
 
 @router.post("/reviews")

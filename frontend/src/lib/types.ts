@@ -25,6 +25,9 @@ export interface Entry {
   note: string | null;
   tts_text: string;
   bucket?: "retry" | "review" | "new";
+  read_count?: number;
+  listen_count?: number;
+  last_ts?: string | null;
 }
 
 export interface Plan {
@@ -68,6 +71,41 @@ export interface ListenPayload {
   remaining: number;
   generating: boolean;
   custom?: boolean;
+  heard_total?: number;
+}
+
+export interface HistoryItem {
+  id: number;
+  entry_id: string;
+  ts: string;
+  mode: "read" | "listen";
+  result: string;
+  duration_sec: number;
+  entry: {
+    id: string;
+    subject: string;
+    submodule: string;
+    point: string;
+    anchor: string;
+    conclusion: string;
+    priority: string;
+  };
+}
+
+export interface LeaderboardItem {
+  entry_id: string;
+  subject: string;
+  submodule: string;
+  point: string;
+  anchor: string;
+  conclusion: string;
+  priority: string;
+  read_count: number;
+  listen_count: number;
+  total_count: number;
+  read_repeat: number;
+  listen_repeat: number;
+  last_ts: string | null;
 }
 
 export interface QuizQuestion {

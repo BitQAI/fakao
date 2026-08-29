@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app import db, service
@@ -21,6 +21,14 @@ class CustomRangeIn(BaseModel):
     subjects: list[str] = []
     points: list[str] = []
     limit: int = Field(default=200, ge=1, le=500)
+
+
+@router.get("/entries/{entry_id}")
+def get_entry(entry_id: str, conn=Depends(db.get_db)):
+    e = service.entry_by_id(conn, entry_id)
+    if e is None:
+        raise HTTPException(404, "条目不存在")
+    return e
 
 
 @router.get("/plans/today")
