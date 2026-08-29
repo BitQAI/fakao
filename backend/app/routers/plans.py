@@ -18,3 +18,10 @@ def regenerate_plan(conn=Depends(db.get_db)):
     conn.execute("DELETE FROM daily_plans WHERE date=?", (day,))
     conn.commit()
     return service.ensure_today_plan(conn, day)
+
+
+@router.get("/listen")
+def listen(conn=Depends(db.get_db)):
+    data = service.listen_queue(conn)
+    data["generating"] = service.ensure_listen_pool(conn)
+    return data

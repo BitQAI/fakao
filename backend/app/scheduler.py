@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 
 PRIORITY_ORDER = {"高频考点": 0, "易错陷阱": 1, "新增必考": 2, "普通": 3}
+SUBJECT_ORDER = ("刑法", "民法", "刑诉", "民诉", "商经知", "理论法", "三国法")
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,8 @@ def next_review_days(result: str) -> int:
 
 
 def days_between(a: str, b: str) -> int:
-    return (date.fromisoformat(b) - date.fromisoformat(a)).days
+    # reviews.ts 为 ISO datetime（如 2026-08-28T13:34:50），只取日期部分比较
+    return (date.fromisoformat(b[:10]) - date.fromisoformat(a[:10])).days
 
 
 def classify(entry_id: str, subject: str, submodule: str, point: str,
@@ -31,7 +33,8 @@ def classify(entry_id: str, subject: str, submodule: str, point: str,
              quiz_wrong_recent: bool, today: str) -> EntryState | None:
     if last_result == "bad" or quiz_wrong_recent:
         return EntryState(entry_id, subject, submodule, point, priority, "retry")
-    if last_review_ts is None or last_result is None:
+    # 听学 exposed 只记暴露不记掌握，视为未学
+    if last_review_ts is None or last_result in (None, "exposed"):
         return EntryState(entry_id, subject, submodule, point, priority, "new")
     if days_between(last_review_ts, today) >= next_review_days(last_result):
         return EntryState(entry_id, subject, submodule, point, priority, "review")
@@ -39,7 +42,8 @@ def classify(entry_id: str, subject: str, submodule: str, point: str,
 
 
 def _sort_key(st: EntryState):
-    return (PRIORITY_ORDER[st.priority], st.entry_id)
+    subject_rank = SUBJECT_ORDER.index(st.subject) if st.subject in SUBJECT_ORDER else len(SUBJECT_ORDER)
+    return (PRIORITY_ORDER[st.priority], subject_rank, st.entry_id)
 
 
 def build_queue(states: list[EntryState], capacity: int,

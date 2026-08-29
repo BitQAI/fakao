@@ -3,8 +3,15 @@ from datetime import date
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, importer
+from app import ai, db, importer
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm(monkeypatch):
+    """API 测试不访问真实 DeepSeek，AI 一律走规则兜底。"""
+    monkeypatch.setattr(ai, "call_llm", lambda *a, **k: None)
+    monkeypatch.setattr(ai, "get_async_client", lambda: None)
 
 
 def seed(conn):
@@ -91,6 +98,15 @@ def test_quiz_flow(client):
     r = client.post("/api/quiz/answer", json={"quiz_id": q["id"], "user_answer": "X"})
     assert r.status_code == 200
     assert r.json()["correct"] is False
+
+
+def test_listen_queue_api(client, monkeypatch):
+    from app import service
+    monkeypatch.setattr(service, "ensure_listen_pool", lambda conn, threshold=50: False)
+    data = client.get("/api/listen").json()
+    assert len(data["items"]) == 1
+    assert data["remaining"] == 1
+    assert data["generating"] is False
 
 
 def test_import_rejects_bad_json(client):

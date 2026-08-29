@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { getJson, postJson } from "@/lib/api";
-import type { Plan } from "@/lib/types";
+import type { Entry, ListenPayload } from "@/lib/types";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 
 export default function ListenView() {
-  const [plan, setPlan] = useState<Plan | null>(null);
+  const [queue, setQueue] = useState<ListenPayload | null>(null);
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState("");
@@ -14,18 +14,25 @@ export default function ListenView() {
   const durRef = useRef(0);
 
   useEffect(() => {
-    getJson<Plan>("/api/plans/today")
-      .then(setPlan)
+    getJson<ListenPayload>("/api/listen")
+      .then(setQueue)
       .catch((e) => setError(String(e)));
   }, []);
 
   if (error) return <p className="muted">加载失败：{error}</p>;
-  if (!plan) return <p className="muted">加载中…</p>;
+  if (!queue) return <p className="muted">加载中…</p>;
 
-  const items = plan.items.filter((e) => e.tts_text);
-  if (items.length === 0) return <div className="card"><p>今日没有可听的条目。</p></div>;
+  const items = queue.items;
+  if (items.length === 0) {
+    return (
+      <div className="card">
+        <p>{queue.generating ? "正在生成更多听学内容…" : "暂无听学内容。"}</p>
+        {queue.remaining === 0 && <p className="muted">剩余不足时系统会自动续批生成。</p>}
+      </div>
+    );
+  }
 
-  const entry = items[idx];
+  const entry: Entry = items[idx];
 
   function next() {
     if (idx + 1 < items.length) setIdx(idx + 1);
@@ -36,7 +43,10 @@ export default function ListenView() {
     <div className="page-box">
       <div className="card center">
         <h2>{entry.subject} · {entry.point}</h2>
-        <p className="muted">{idx + 1} / {items.length} · 听学只记暴露，不记掌握</p>
+        <p className="muted">
+          {idx + 1} / {items.length} · 剩余可听 {queue.remaining} · 听学只记暴露，不记掌握
+          {queue.generating ? " · 正在续批生成…" : ""}
+        </p>
         <audio
           ref={audioRef}
           controls

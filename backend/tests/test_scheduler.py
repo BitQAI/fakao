@@ -11,6 +11,10 @@ def test_days_between():
     assert S.days_between("2026-08-25", "2026-08-27") == 2
 
 
+def test_days_between_accepts_datetime_ts():
+    assert S.days_between("2026-08-26T10:00:00", "2026-08-28") == 2
+
+
 def test_classify_buckets():
     today = "2026-08-27"
     assert S.classify("XF-001", "刑法", "分则-财产犯罪", "转化型抢劫", "高频考点",
@@ -23,6 +27,12 @@ def test_classify_buckets():
                       "2026-08-25", "good", False, today).bucket == "review"
     assert S.classify("XF-001", "刑法", "分则-财产犯罪", "转化型抢劫", "高频考点",
                       "2026-08-27", "good", False, today) is None
+
+
+def test_classify_exposed_treated_as_new():
+    st = S.classify("XF-001", "刑法", "a", "p", "高频考点",
+                    "2026-08-26T10:00:00", "exposed", False, "2026-08-28")
+    assert st is not None and st.bucket == "new"
 
 
 def test_build_queue_retry_first_then_quota():
@@ -54,6 +64,18 @@ def test_build_queue_truncates_capacity():
     states = [S.EntryState(f"XF-{i:03d}", "刑法", "a", f"p{i}", "普通", "new")
               for i in range(1, 6)]
     assert len(S.build_queue(states, capacity=3, new_ratio=0.5)) == 3
+
+
+def test_build_queue_orders_by_priority_then_subject():
+    states = [
+        S.EntryState("MF-001", "民法", "a", "p1", "高频考点", "new"),
+        S.EntryState("LL-001", "理论法", "a", "p2", "高频考点", "new"),
+        S.EntryState("XS-001", "刑诉", "a", "p3", "普通", "new"),
+        S.EntryState("XF-001", "刑法", "a", "p4", "易错陷阱", "new"),
+    ]
+    queue = S.build_queue(states, capacity=4, new_ratio=1.0)
+    # 高频考点优先（刑法规前），易错陷阱次之，普通最后
+    assert queue == ["MF-001", "LL-001", "XF-001", "XS-001"]
 
 
 def test_compute_capacity():

@@ -63,6 +63,12 @@ export interface TodayPayload {
   morning_report: Report | null;
 }
 
+export interface ListenPayload {
+  items: Entry[];
+  remaining: number;
+  generating: boolean;
+}
+
 export interface QuizQuestion {
   id: number;
   entry_id: string;

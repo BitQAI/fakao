@@ -1,6 +1,16 @@
 from datetime import date
 
+import pytest
+
+from app import ai
 from app import db, importer, service
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm(monkeypatch):
+    """服务层测试不访问真实 DeepSeek，AI 一律走规则兜底（确定性）。"""
+    monkeypatch.setattr(ai, "call_llm", lambda *a, **k: None)
+    monkeypatch.setattr(ai, "get_async_client", lambda: None)
 
 
 def seed(conn, n=5):
@@ -103,3 +113,83 @@ def test_assistant_context_finds_entry(tmp_db):
     context, ids, refs = service.assistant_context(conn, "考点3")
     assert "XF-003" in ids
     assert "考点3" in context
+
+
+def test_listen_queue_unheard_first_and_remaining(tmp_db):
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn)
+    service.record_review(conn, "XF-001", "listen", "exposed", 30)
+    data = service.listen_queue(conn)
+    assert data["remaining"] == 4
+    ids = [e["id"] for e in data["items"]]
+    assert ids[0] == "XF-002"  # 未听优先
+    assert "XF-001" in ids     # 已听排后面
+
+
+def test_listen_queue_orders_by_priority_then_subject(tmp_db):
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn, n=3)
+    # 追加一条普通优先级 + 一条理论法高频，验证排序权重
+    extra = [{
+        "id": "LL-001", "subject": "理论法", "submodule": "法理学",
+        "point": "考点LL", "anchor": "乙实施行为后产生完整案件事实描述",
+        "conclusion": "成立理论结论。", "priority": "高频考点",
+        "rationale": "高频", "sources": [{"type": "高频", "ref": "x.md", "loc": "x"}],
+        "statutes": [], "note": None, "tts_text": "【理论法】考点LL。",
+    }, {
+        "id": "XF-099", "subject": "刑法", "submodule": "分则",
+        "point": "考点普通", "anchor": "丙实施行为后产生完整案件事实描述",
+        "conclusion": "成立普通结论。", "priority": "普通",
+        "rationale": "普通", "sources": [{"type": "高频", "ref": "x.md", "loc": "x"}],
+        "statutes": [], "note": None, "tts_text": "【刑法】考点普通。",
+    }]
+    importer.import_payload(conn, {"schema": "fakao-entry/1.0", "status": "final",
+                                   "generated_at": "x", "count": 2, "entries": extra})
+    data = service.listen_queue(conn)
+    ids = [e["id"] for e in data["items"]]
+    # 未听全部在前；未听内：高频（刑法 XF-001/2/3 → 理论法 LL-001）→ 普通 XF-099
+    assert ids.index("LL-001") < ids.index("XF-099")
+    assert ids.index("XF-001") < ids.index("LL-001")
+
+
+def test_listen_queue_not_truncated_by_id_before_ranking(tmp_db):
+    """id 字典序在前的科目（如 LL）不应挤掉未听高频的 XF 条目。"""
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    entries = []
+    for i in range(1, 101):
+        entries.append({
+            "id": f"LL-{i:03d}", "subject": "理论法", "submodule": "法理学",
+            "point": f"理论点{i}", "anchor": f"甲实施行为{i}产生完整案件事实描述",
+            "conclusion": f"成立理论结论{i}。", "priority": "普通",
+            "rationale": "普通", "sources": [{"type": "高频", "ref": "x.md", "loc": "x"}],
+            "statutes": [], "note": None, "tts_text": f"【理论法】点{i}。",
+        })
+    for i in range(1, 51):
+        entries.append({
+            "id": f"XF-{i:03d}", "subject": "刑法", "submodule": "总则",
+            "point": f"刑法点{i}", "anchor": f"乙实施行为{i}产生完整案件事实描述",
+            "conclusion": f"成立刑法结论{i}。", "priority": "高频考点",
+            "rationale": "高频", "sources": [{"type": "高频", "ref": "x.md", "loc": "x"}],
+            "statutes": [], "note": None, "tts_text": f"【刑法】点{i}。",
+        })
+    importer.import_payload(conn, {"schema": "fakao-entry/1.0", "status": "final",
+                                   "generated_at": "x", "count": len(entries),
+                                   "entries": entries})
+    data = service.listen_queue(conn, limit=100)
+    ids = [e["id"] for e in data["items"]]
+    assert len(ids) == 100
+    assert all(i.startswith("XF-") for i in ids[:10])  # 高频刑法未被 id 截断挤出
+
+
+def test_ensure_listen_pool_triggers_when_low(tmp_db, monkeypatch):
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn, n=3)
+    from app import generator
+    monkeypatch.setattr(generator, "ensure_generation", lambda c: True)
+    assert service.ensure_listen_pool(conn, threshold=5) is True
+    monkeypatch.setattr(generator, "ensure_generation", lambda c: False)
+    assert service.ensure_listen_pool(conn, threshold=2) is False

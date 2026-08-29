@@ -9,6 +9,7 @@ from datetime import date, datetime
 from app import ai
 from app import config
 from app import coverage as cov
+from app import generator
 from app import scheduler
 
 _WORD_SPLIT = re.compile(r"[\s，。、；：？！,.;:?!()（）]+")
@@ -370,3 +371,40 @@ def record_chat(conn, question: str, answer: str,
          json.dumps(source_refs, ensure_ascii=False)),
     )
     conn.commit()
+
+
+def listen_queue(conn, limit: int = 100) -> dict:
+    """听学池：未听过优先，同层级按 priority 权重 + 科目顺序编排。"""
+    rows = conn.execute(
+        """
+        SELECT e.*,
+               (SELECT COUNT(*) FROM reviews r
+                WHERE r.entry_id=e.id AND r.mode='listen') AS listen_cnt
+        FROM entries e
+        WHERE e.status='final' AND e.tts_text != ''
+        """).fetchall()
+    remaining = conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM entries e
+        WHERE e.status='final' AND e.tts_text != ''
+          AND NOT EXISTS (SELECT 1 FROM reviews r
+                          WHERE r.entry_id=e.id AND r.mode='listen')
+        """).fetchone()["n"]
+    decorated = []
+    for r in rows:
+        e = _entry_dict(r)
+        subject_rank = (scheduler.SUBJECT_ORDER.index(r["subject"])
+                        if r["subject"] in scheduler.SUBJECT_ORDER
+                        else len(scheduler.SUBJECT_ORDER))
+        decorated.append((e, r["listen_cnt"],
+                          scheduler.PRIORITY_ORDER.get(r["priority"], 9),
+                          subject_rank, r["id"]))
+    decorated.sort(key=lambda t: (t[1], t[2], t[3], t[4]))
+    return {"items": [t[0] for t in decorated[:limit]], "remaining": remaining}
+
+
+def ensure_listen_pool(conn, threshold: int = 50) -> bool:
+    """剩余可听数低于阈值时触发后台生成；返回是否触发。"""
+    if listen_queue(conn, limit=1)["remaining"] >= threshold:
+        return False
+    return generator.ensure_generation(conn)
