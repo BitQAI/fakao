@@ -2,27 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getJson, postJson } from "@/lib/api";
+import { readSavedQueue, writeSavedQueue } from "@/lib/progressStore";
 import type { Entry, ListenPayload } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 
 const QUEUE_STORE_KEY = "fakao.listen.queue.v1";
-
-function readSaved(): { ids: string[]; idx: number } | null {
-  try {
-    const raw = localStorage.getItem(QUEUE_STORE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (Array.isArray(data.ids) && typeof data.idx === "number") return data;
-  } catch { /* 忽略损坏的本地缓存 */ }
-  return null;
-}
-
-function writeSaved(ids: string[], idx: number) {
-  try {
-    localStorage.setItem(QUEUE_STORE_KEY, JSON.stringify({ ids, idx }));
-  } catch { /* 忽略存储失败 */ }
-}
 
 export default function ListenView() {
   const searchParams = useSearchParams();
@@ -54,7 +39,7 @@ export default function ListenView() {
           items = [target, ...q.items.filter((i) => i.id !== target.id)];
           setDeep(true);
         }
-        const saved = readSaved();
+        const saved = readSavedQueue(QUEUE_STORE_KEY);
         let startIdx = 0;
         if (!entryParam && saved && saved.ids.length === items.length &&
             saved.ids.every((id, i) => id === items[i].id)) {
@@ -70,7 +55,7 @@ export default function ListenView() {
   // 队列位置持久化：刷新/离开后回来可恢复
   useEffect(() => {
     if (!queue || queue.items.length === 0) return;
-    writeSaved(queue.items.map((i) => i.id), idx);
+    writeSavedQueue(QUEUE_STORE_KEY, queue.items.map((i) => i.id), idx);
   }, [queue, idx]);
 
   // 切条目时重置播放统计与去重标记

@@ -1,4 +1,37 @@
 """看/听历史与合并排行榜统计（基于 reviews 表的聚合查询）。"""
+from datetime import date
+
+
+def attach_read_counts(conn, items: list[dict]) -> list[dict]:
+    """批量给条目附加 read_count（看背卡片显示已看次数）。"""
+    if not items:
+        return items
+    ids = [it["id"] for it in items]
+    placeholders = ",".join("?" * len(ids))
+    counts = {r["entry_id"]: r["n"] for r in conn.execute(
+        f"SELECT entry_id, COUNT(*) AS n FROM reviews "
+        f"WHERE mode='read' AND entry_id IN ({placeholders}) GROUP BY entry_id",
+        ids)}
+    for it in items:
+        it["read_count"] = counts.get(it["id"], 0)
+    return items
+
+
+def attach_reviewed_today(conn, items: list[dict],
+                          day: str | None = None) -> list[dict]:
+    """批量标记条目今天是否已看过（看背进度记忆）。"""
+    if not items:
+        return items
+    day = day or date.today().isoformat()
+    ids = [it["id"] for it in items]
+    placeholders = ",".join("?" * len(ids))
+    done = {r["entry_id"] for r in conn.execute(
+        f"SELECT DISTINCT entry_id FROM reviews "
+        f"WHERE mode='read' AND date(ts)=? AND entry_id IN ({placeholders})",
+        [day, *ids])}
+    for it in items:
+        it["reviewed_today"] = it["id"] in done
+    return items
 
 
 def attach_listen_counts(conn, items: list[dict]) -> list[dict]:

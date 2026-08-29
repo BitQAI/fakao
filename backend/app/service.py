@@ -59,24 +59,9 @@ def entry_by_id(conn, entry_id: str) -> dict | None:
     if r is None:
         return None
     e = _entry_dict(r)
-    _attach_read_counts(conn, [e])
+    review_stats.attach_read_counts(conn, [e])
     review_stats.attach_listen_counts(conn, [e])
     return e
-
-
-def _attach_read_counts(conn, items: list[dict]) -> list[dict]:
-    """批量给条目附加 read_count（看背卡片显示已看次数）。"""
-    if not items:
-        return items
-    ids = [it["id"] for it in items]
-    placeholders = ",".join("?" * len(ids))
-    counts = {r["entry_id"]: r["n"] for r in conn.execute(
-        f"SELECT entry_id, COUNT(*) AS n FROM reviews "
-        f"WHERE mode='read' AND entry_id IN ({placeholders}) GROUP BY entry_id",
-        ids)}
-    for it in items:
-        it["read_count"] = counts.get(it["id"], 0)
-    return items
 
 
 def _recent_daily_counts(conn, day: str) -> list[int]:
@@ -167,7 +152,8 @@ def plan_payload(conn, day: str) -> dict:
             continue
         e["bucket"] = it["bucket"]
         detail.append(e)
-    _attach_read_counts(conn, detail)
+    review_stats.attach_read_counts(conn, detail)
+    review_stats.attach_reviewed_today(conn, detail, day)
     return {"date": day, "quota": row["quota"], "rationale": row["rationale"],
             "items": detail, "counts": counts}
 
@@ -221,7 +207,8 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
             if e is not None:
                 e["bucket"] = bucket_by_id.get(eid, "new")
                 items.append(e)
-    return _attach_read_counts(conn, items)
+    return review_stats.attach_reviewed_today(
+        conn, review_stats.attach_read_counts(conn, items), day)
 
 
 def custom_entries(conn, subjects: list[str] | None = None,
@@ -250,8 +237,10 @@ def custom_entries(conn, subjects: list[str] | None = None,
         if e["subject"] in scheduler.SUBJECT_ORDER else len(scheduler.SUBJECT_ORDER),
         e["id"],
     ))
-    return review_stats.attach_listen_counts(
-        conn, _attach_read_counts(conn, items[:limit]))
+    return review_stats.attach_reviewed_today(
+        conn,
+        review_stats.attach_listen_counts(
+            conn, review_stats.attach_read_counts(conn, items[:limit])))
 
 
 def record_review(conn, entry_id: str, mode: str, result: str,
