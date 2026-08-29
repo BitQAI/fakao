@@ -206,17 +206,6 @@ def record_review(conn, entry_id: str, mode: str, result: str,
     conn.commit()
 
 
-def record_quiz_answer(conn, quiz_id: int, user_answer: str, correct: bool,
-                       duration_sec: int = 0) -> None:
-    conn.execute(
-        "INSERT INTO quiz_answers (quiz_id, ts, user_answer, correct, duration_sec) "
-        "VALUES (?,?,?,?,?)",
-        (quiz_id, datetime.now().isoformat(timespec="seconds"),
-         user_answer, int(correct), duration_sec),
-    )
-    conn.commit()
-
-
 def _weak_submodule(conn) -> str | None:
     tree = coverage_payload(conn)
     best = None
@@ -252,70 +241,6 @@ def today_stats(conn, day: str | None = None) -> dict:
         "weak": _weak_submodule(conn) or "暂无",
         "days_left": days_left(conn, day),
     }
-
-
-def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict]:
-    day = day or date.today().isoformat()
-    ensure_today_plan(conn, day)
-    plan = plan_payload(conn, day)
-    today_ids = [it["id"] for it in plan["items"]]
-    wrong_ids = [
-        r["entry_id"] for r in conn.execute(
-            "SELECT DISTINCT q.entry_id FROM quiz_answers qa "
-            "JOIN quizzes q ON qa.quiz_id=q.id "
-            "WHERE qa.correct=0 AND q.entry_id IS NOT NULL"
-        ).fetchall()
-    ]
-    selected: list[str] = []
-    n_today = round(limit * 0.7)
-    selected += [i for i in today_ids if i not in selected][:n_today]
-    selected += [i for i in wrong_ids
-                 if i not in selected and i not in today_ids]
-    if len(selected) < limit:
-        for i in today_ids:
-            if len(selected) >= limit:
-                break
-            if i not in selected:
-                selected.append(i)
-    selected = selected[:limit]
-
-    out = []
-    for entry_id in selected:
-        entry = _entry_by_id(conn, entry_id)
-        if entry is None:
-            continue
-        cached = conn.execute(
-            "SELECT id, qtype, stem, options, answer, analysis FROM quizzes "
-            "WHERE entry_id=? AND date(created_at)=?", (entry_id, day)
-        ).fetchone()
-        if cached:
-            quiz = {"id": cached["id"], "entry_id": entry_id,
-                    "qtype": cached["qtype"], "stem": cached["stem"],
-                    "options": json.loads(cached["options"] or "[]"),
-                    "answer": cached["answer"], "analysis": cached["analysis"] or ""}
-            if not quiz["analysis"]:
-                analysis = ai.generate_quiz_analysis(quiz) or ""
-                if not analysis:
-                    ans = quiz["answer"].strip().upper()
-                    analysis = (f"正确答案：{ans}。" if quiz["qtype"] == "choice"
-                                else quiz["answer"])
-                quiz["analysis"] = analysis
-                conn.execute("UPDATE quizzes SET analysis=? WHERE id=?",
-                             (analysis, quiz["id"]))
-        else:
-            quiz = ai.generate_quiz(entry) or ai.cloze_quiz(entry)
-            cur = conn.execute(
-                "INSERT INTO quizzes (entry_id, qtype, stem, options, answer, analysis, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (entry_id, quiz["qtype"], quiz["stem"],
-                 json.dumps(quiz["options"], ensure_ascii=False),
-                 quiz["answer"], quiz.get("analysis", ""),
-                 datetime.now().isoformat(timespec="seconds")),
-            )
-            quiz = {**quiz, "id": cur.lastrowid, "entry_id": entry_id}
-        out.append(quiz)
-    conn.commit()
-    return out
 
 
 def coverage_payload(conn) -> dict:

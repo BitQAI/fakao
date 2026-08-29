@@ -79,6 +79,20 @@ export interface QuizQuestion {
   analysis?: string;
 }
 
+export interface QuizHistoryItem {
+  answer_id: number;
+  quiz_id: number;
+  ts: string;
+  user_answer: string;
+  picked_texts: string[];
+  correct: boolean;
+  qtype: "choice" | "cloze";
+  stem: string;
+  options: string[];
+  answer: string;
+  analysis: string;
+}
+
 export interface CoverageNode {
   count: number;
   states: Record<string, number>;

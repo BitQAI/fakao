@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from app import ai
+from app import ai, quiz_service
 from app import db, importer, service
 
 
@@ -68,7 +68,7 @@ def test_build_daily_quiz_falls_back_to_cloze(tmp_db):
     conn = db.connect(db_path)
     seed(conn)
     service.ensure_today_plan(conn, "2026-08-27")
-    questions = service.build_daily_quiz(conn, "2026-08-27")
+    questions = quiz_service.build_daily_quiz(conn, "2026-08-27")
     assert questions and questions[0]["qtype"] == "cloze"
     assert "____" in questions[0]["stem"]
 
@@ -80,8 +80,8 @@ def test_quiz_answer_records(tmp_db):
     service.set_setting(conn, "exam_date", "2026-09-13")
     today = date.today().isoformat()
     service.ensure_today_plan(conn, today)
-    questions = service.build_daily_quiz(conn, today)
-    service.record_quiz_answer(conn, questions[0]["id"], "随便答", False)
+    questions = quiz_service.build_daily_quiz(conn, today)
+    quiz_service.record_quiz_answer(conn, questions[0]["id"], "随便答", False)
     stats = service.today_stats(conn, today)
     assert stats["quiz_total"] == 1 and stats["quiz_correct"] == 0
     assert stats["days_left"] == (date(2026, 9, 13) - date.today()).days

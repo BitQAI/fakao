@@ -107,6 +107,55 @@ def test_quiz_today_has_analysis(tmp_path, monkeypatch):
     assert all(q["analysis"] for q in data["questions"])
 
 
+def test_quiz_history_returns_picked_options(tmp_path, monkeypatch):
+    """历史接口返回做题记录，含用户当时的选项文本与解析。"""
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    qid = _insert_quiz(db_path)
+    conn = db.connect(db_path)
+    conn.execute(
+        "INSERT INTO quiz_answers (quiz_id, ts, user_answer, correct, duration_sec) "
+        "VALUES (?,?,?,?,?)",
+        (qid, "2026-08-29T10:00:00", "BA", 1, 12),
+    )
+    conn.commit()
+    conn.close()
+    items = client.get("/api/quiz/history").json()["items"]
+    assert len(items) == 1
+    item = items[0]
+    assert item["correct"] is True
+    assert item["user_answer"] == "BA"
+    assert any("甲对" in t for t in item["picked_texts"])
+    assert any("乙对" in t for t in item["picked_texts"])
+    assert item["stem"] and item["options"]
+    assert item["analysis"]
+
+
+def test_quiz_history_fallback_analysis(tmp_path, monkeypatch):
+    """存量空解析题在历史中必须得到非空兜底解析（含考点结论）。"""
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    qid = _insert_quiz(db_path, analysis="")
+    conn = db.connect(db_path)
+    conn.execute(
+        "INSERT INTO quiz_answers (quiz_id, ts, user_answer, correct, duration_sec) "
+        "VALUES (?,?,?,?,?)",
+        (qid, "2026-08-29T10:00:00", "AB", 1, 12),
+    )
+    conn.commit()
+    conn.close()
+    item = client.get("/api/quiz/history").json()["items"][0]
+    assert item["analysis"]
+    assert "考点结论" in item["analysis"] or item["answer"] in item["analysis"]
+
+
+def test_quiz_answer_fallback_analysis(tmp_path, monkeypatch):
+    """答题接口对空解析题必须返回非空解析。"""
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    qid = _insert_quiz(db_path, analysis="")
+    r = client.post("/api/quiz/answer", json={"quiz_id": qid, "user_answer": "AB"})
+    assert r.status_code == 200
+    assert r.json()["analysis"]
+
+
 def test_plans_continue_excludes_today(tmp_path, monkeypatch):
     client, db_path = _make_client(tmp_path, monkeypatch)
     conn = db.connect(db_path)
