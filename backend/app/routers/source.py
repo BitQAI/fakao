@@ -33,7 +33,9 @@ def get_source(ref: str, loc: str = "", conn=Depends(db.get_db)):
 
 @router.get("/statute")
 def get_statute(law: str, no: str):
-    text = statutes.resolve_statute(f"{law}第{no}" if no.endswith("条") else f"{law}第{no}条")
+    no = no.strip()
+    ref = f"{law}{no}" if "条" in no else f"{law}第{no}条"
+    text = statutes.resolve_statute(ref)
     if text is None:
         raise HTTPException(404, "法条未收录")
     return {"law": law, "no": no, "text": text}

@@ -181,6 +181,23 @@ def test_statute_ok(client, tmp_path, monkeypatch):
     assert "窝藏赃物" in r.json()["text"]
 
 
+def test_statute_kuan_suffix(client, tmp_path, monkeypatch):
+    """带「款」引用的法条（刑法第20条第3款）应解析到整条正文。"""
+    from app import config, statutes
+    monkeypatch.setattr(config, "STATUTE_DIR", tmp_path)
+    (tmp_path / "中华人民共和国刑法.md").write_text(
+        "第二十条　为了使国家、公共利益、本人或者他人的人身、财产和其他权利"
+        "免受正在进行的不法侵害，而采取的制止不法侵害的行为，对不法侵害人造成损害的，"
+        "属于正当防卫，不负刑事责任。",
+        encoding="utf-8",
+    )
+    statutes._STATUTE_CACHE.clear()
+    statutes._LAW_FILE_CACHE.clear()
+    r = client.get("/api/statute", params={"law": "刑法", "no": "20条第3款"})
+    assert r.status_code == 200
+    assert "正当防卫" in r.json()["text"]
+
+
 def test_statute_missing_404(client, tmp_path, monkeypatch):
     from app import config, statutes
     monkeypatch.setattr(config, "STATUTE_DIR", tmp_path)

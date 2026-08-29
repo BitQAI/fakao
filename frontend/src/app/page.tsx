@@ -43,7 +43,7 @@ export default function TodayPage() {
           <div className="count"><b>{plan.counts.retry}</b><span>错题</span></div>
           <div className="count"><b>{stats.done}/{stats.quota}</b><span>已完成</span></div>
         </div>
-        <p className="muted">{plan.rationale}</p>
+        <div className="report-content muted" dangerouslySetInnerHTML={{ __html: mdToHtml(plan.rationale) }} />
       </section>
 
       <section className="quick-actions">

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { getJson } from "@/lib/api";
+import { mdToHtml } from "@/lib/md";
 
 export interface SourceTarget {
   kind: "case" | "file";
@@ -59,7 +60,12 @@ export default function SourceViewer({
         <div className="source-body">
           {loading && <p className="muted">加载中…</p>}
           {error && <p className="bad">原文不可用：{error}</p>}
-          {data && <pre className="source-text">{data.text}</pre>}
+          {data && (
+            <div
+              className="source-text"
+              dangerouslySetInnerHTML={{ __html: mdToHtml(data.text) }}
+            />
+          )}
         </div>
       </div>
     </div>

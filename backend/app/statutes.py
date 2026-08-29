@@ -42,7 +42,8 @@ STATUTE_ALIASES = {
 _CN_DIGITS = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
               "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _ARTICLE_RE = re.compile(
-    r"第?(?P<num>[0-9零一二三四五六七八九十百千]+)条(?P<sub>之[零一二三四五六七八九十]+)?$"
+    r"第?(?P<num>[0-9零一二三四五六七八九十百千]+)条"
+    r"(?P<sub>之[零一二三四五六七八九十]+)?(?P<rest>.*)$"
 )
 _ARTICLE_LINE_RE = re.compile(
     r"^\**第(?P<num>[零一二三四五六七八九十百千]+)条"
@@ -107,7 +108,8 @@ def resolve_law_file(law: str) -> Path | None:
 
 
 def resolve_statute(text: str) -> str | None:
-    """"刑法269条"/"民法典第1165条"/"刑法287条之二" → 条文正文；解析不到返回 None。"""
+    """"刑法269条"/"民法典第1165条"/"刑法287条之二"/"刑法第20条第3款" → 条文正文；
+    条号后的款/项/目后缀忽略（返回整条正文）；解析不到返回 None。"""
     if text in _STATUTE_CACHE:
         return _STATUTE_CACHE[text]
     m = _ARTICLE_RE.search(text)

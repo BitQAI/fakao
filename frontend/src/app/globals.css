@@ -74,33 +74,48 @@ body {
 }
 .nav-item.active { color: var(--primary); }
 .nav-icon { font-size: 18px; }
-.flashcard { perspective: 900px; min-height: 300px; cursor: pointer; }
+.flashcard { perspective: 900px; cursor: pointer; }
 .flashcard-inner {
-  position: relative; width: 100%; height: 100%; min-height: 300px;
+  display: grid; width: 100%; min-height: 300px;
   transition: transform 0.35s; transform-style: preserve-3d;
 }
 .flashcard.flipped .flashcard-inner { transform: rotateY(180deg); }
 .flashcard-face {
-  position: absolute; inset: 0; backface-visibility: hidden;
+  grid-area: 1 / 1; backface-visibility: hidden;
   background: var(--card); border: 1px solid var(--line); border-radius: 14px;
   padding: 20px; display: flex; flex-direction: column; gap: 10px;
 }
-.flashcard-face.back { transform: rotateY(180deg); justify-content: center; }
+.flashcard-face.back { transform: rotateY(180deg); }
 .hint { color: var(--muted); font-size: 12px; margin-top: auto; text-align: center; }
 .tag { font-size: 12px; color: var(--primary); }
 .note { color: var(--bad); font-size: 13px; }
-.rate-row { display: flex; gap: 8px; margin-top: 12px; }
+.rate-row { display: flex; gap: 8px; margin-top: 14px; }
 .options-col { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .option {
+  display: flex; align-items: flex-start; gap: 8px;
   border: 1px solid var(--line); background: var(--card); border-radius: 10px;
   padding: 12px; font-size: 14px; text-align: left; cursor: pointer;
 }
+.option-check {
+  flex: none; width: 18px; height: 18px; margin-top: 1px;
+  border: 1.5px solid var(--line); border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; color: #fff; line-height: 1;
+}
+.option-check.checked { background: var(--primary); border-color: var(--primary); }
+.option.picked:not(.correct):not(.wrong) .option-check { border-color: var(--primary); }
 .option.picked { border-color: var(--primary); }
 .option.correct { border-color: var(--good); background: #f0fdf4; }
 .option.wrong { border-color: var(--bad); background: #fef2f2; }
 .result { margin-top: 12px; padding: 10px; border-radius: 10px; }
 .result.ok { background: #f0fdf4; }
 .result.bad { background: #fef2f2; }
+.analysis {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  line-height: 1.7; background: rgba(255, 255, 255, 0.65);
+}
+.analysis p { margin: 0; }
+.result.bad .analysis { background: #fff; }
 .row { display: flex; gap: 8px; margin-top: 10px; }
 .ai-fab {
   position: fixed; right: 16px; bottom: 76px; width: 52px; height: 52px;
@@ -154,14 +169,46 @@ body {
 }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 13px; }
 .field input { border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 15px; }
-.report-content h3 { margin: 8px 0 4px; font-size: 15px; }
-.report-content li { margin-left: 16px; }
+.report-content h1, .report-content h2 { margin: 10px 0 4px; font-size: 17px; }
+.report-content h3 { margin: 10px 0 4px; font-size: 15px; }
+.report-content h4, .report-content h5, .report-content h6 { margin: 8px 0 4px; font-size: 14px; }
+.report-content p { margin: 6px 0; line-height: 1.7; }
+.report-content ul, .report-content ol { margin: 6px 0; padding-left: 22px; }
+.report-content li { margin: 3px 0; line-height: 1.6; }
+.report-content strong { font-weight: 700; }
+.report-content em { font-style: italic; }
+.report-content code {
+  background: #f3f4f6; border: 1px solid var(--line); border-radius: 4px;
+  padding: 1px 5px; font-size: 13px;
+}
+.report-content blockquote {
+  margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--line);
+  color: var(--muted); background: #f9fafb; border-radius: 0 8px 8px 0;
+}
+.report-content table {
+  width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px;
+}
+.report-content th, .report-content td {
+  border: 1px solid var(--line); padding: 6px 8px; text-align: left; line-height: 1.5;
+}
+.report-content th { background: #f9fafb; font-weight: 600; }
+.report-content hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .ok { color: var(--good); } .bad { color: var(--bad); }
-.source-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.source-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip {
   border: 1px solid var(--primary); color: var(--primary); background: #eef2ff;
-  border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  border-radius: 999px; padding: 5px 12px; font-size: 13px; line-height: 1.4;
+  cursor: pointer; max-width: 100%;
 }
+.chip-case {
+  display: block; width: 100%; text-align: left;
+  border: 1px solid var(--line); color: var(--ink); background: #f9fafb;
+  border-radius: 10px; padding: 9px 12px; font-size: 13px; line-height: 1.5;
+  cursor: pointer;
+}
+.chip-case:active { background: #eef2ff; border-color: var(--primary); }
+.flashcard-face .source-chips { margin-top: 2px; }
+.flashcard-face .btn-ghost { flex: none; width: 100%; }
 .source-modal {
   position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.4);
   display: flex; align-items: flex-end; justify-content: center;
@@ -171,7 +218,21 @@ body {
   border-radius: 16px 16px 0 0; display: flex; flex-direction: column; overflow: hidden;
 }
 .source-body { flex: 1; overflow-y: auto; padding: 12px; }
-.source-text {
-  white-space: pre-wrap; word-break: break-word; font-family: inherit;
-  font-size: 14px; line-height: 1.7; margin: 0;
+.continue-box { margin-top: 14px; }
+.continue-custom { display: flex; gap: 8px; margin-top: 8px; }
+.continue-custom input {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px; font-size: 15px;
 }
+.source-text {
+  word-break: break-word; font-family: inherit; font-size: 14px; line-height: 1.75;
+  margin: 0;
+}
+.source-text p { margin: 0 0 8px; }
+.source-text h1, .source-text h2, .source-text h3 {
+  margin: 12px 0 6px; font-size: 16px;
+}
+.source-text ul, .source-text ol { margin: 4px 0 8px; padding-left: 22px; }
+.source-text li { margin: 2px 0; }
+.source-text strong { font-weight: 700; }
+.source-text hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
