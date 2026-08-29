@@ -10,6 +10,7 @@ from app import ai
 from app import config
 from app import coverage as cov
 from app import generator
+from app import review_stats
 from app import scheduler
 
 _WORD_SPLIT = re.compile(r"[\s，。、；：？！,.;:?!()（）]+")
@@ -49,6 +50,33 @@ def _entry_dict(r) -> dict:
 def _entry_by_id(conn, entry_id: str) -> dict | None:
     r = conn.execute("SELECT * FROM entries WHERE id=?", (entry_id,)).fetchone()
     return _entry_dict(r) if r else None
+
+
+def entry_by_id(conn, entry_id: str) -> dict | None:
+    """公开入口：按 id 取单条 final 条目（供深链/历史跳转）。"""
+    r = conn.execute("SELECT * FROM entries WHERE id=? AND status='final'",
+                     (entry_id,)).fetchone()
+    if r is None:
+        return None
+    e = _entry_dict(r)
+    _attach_read_counts(conn, [e])
+    review_stats.attach_listen_counts(conn, [e])
+    return e
+
+
+def _attach_read_counts(conn, items: list[dict]) -> list[dict]:
+    """批量给条目附加 read_count（看背卡片显示已看次数）。"""
+    if not items:
+        return items
+    ids = [it["id"] for it in items]
+    placeholders = ",".join("?" * len(ids))
+    counts = {r["entry_id"]: r["n"] for r in conn.execute(
+        f"SELECT entry_id, COUNT(*) AS n FROM reviews "
+        f"WHERE mode='read' AND entry_id IN ({placeholders}) GROUP BY entry_id",
+        ids)}
+    for it in items:
+        it["read_count"] = counts.get(it["id"], 0)
+    return items
 
 
 def _recent_daily_counts(conn, day: str) -> list[int]:
@@ -139,6 +167,7 @@ def plan_payload(conn, day: str) -> dict:
             continue
         e["bucket"] = it["bucket"]
         detail.append(e)
+    _attach_read_counts(conn, detail)
     return {"date": day, "quota": row["quota"], "rationale": row["rationale"],
             "items": detail, "counts": counts}
 
@@ -192,7 +221,7 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
             if e is not None:
                 e["bucket"] = bucket_by_id.get(eid, "new")
                 items.append(e)
-    return items
+    return _attach_read_counts(conn, items)
 
 
 def custom_entries(conn, subjects: list[str] | None = None,
@@ -221,7 +250,8 @@ def custom_entries(conn, subjects: list[str] | None = None,
         if e["subject"] in scheduler.SUBJECT_ORDER else len(scheduler.SUBJECT_ORDER),
         e["id"],
     ))
-    return items[:limit]
+    return review_stats.attach_listen_counts(
+        conn, _attach_read_counts(conn, items[:limit]))
 
 
 def record_review(conn, entry_id: str, mode: str, result: str,
@@ -390,13 +420,18 @@ def record_chat(conn, question: str, answer: str,
 
 
 def _listen_pool(conn, exclude: set[str] | None = None):
-    """听学池排序（未听过优先，同层级按 priority 权重 + 科目顺序），可排除 id 集合。"""
+    """听学池排序（未听过优先；已听按最近听过倒序），可排除 id 集合。
+
+    返回 (items, remaining)，每条 item 附 listen_count / last_ts 供前端标记已听。
+    """
     exclude = exclude or set()
     rows = conn.execute(
         """
         SELECT e.*,
                (SELECT COUNT(*) FROM reviews r
-                WHERE r.entry_id=e.id AND r.mode='listen') AS listen_cnt
+                WHERE r.entry_id=e.id AND r.mode='listen') AS listen_cnt,
+               (SELECT MAX(r.ts) FROM reviews r
+                WHERE r.entry_id=e.id AND r.mode='listen') AS last_ts
         FROM entries e
         WHERE e.status='final' AND e.tts_text != ''
         """).fetchall()
@@ -407,31 +442,45 @@ def _listen_pool(conn, exclude: set[str] | None = None):
           AND NOT EXISTS (SELECT 1 FROM reviews r
                           WHERE r.entry_id=e.id AND r.mode='listen')
         """).fetchone()["n"]
-    decorated = []
+    never = []
+    heard = []
     for r in rows:
         if r["id"] in exclude:
             continue
         e = _entry_dict(r)
+        e["listen_count"] = r["listen_cnt"]
+        e["last_ts"] = r["last_ts"]
         subject_rank = (scheduler.SUBJECT_ORDER.index(r["subject"])
                         if r["subject"] in scheduler.SUBJECT_ORDER
                         else len(scheduler.SUBJECT_ORDER))
-        decorated.append((e, r["listen_cnt"],
-                          scheduler.PRIORITY_ORDER.get(r["priority"], 9),
-                          subject_rank, r["id"]))
-    decorated.sort(key=lambda t: (t[1], t[2], t[3], t[4]))
-    return [t[0] for t in decorated], remaining
+        prio_rank = scheduler.PRIORITY_ORDER.get(r["priority"], 9)
+        item = (e, r["listen_cnt"], r["last_ts"], prio_rank, subject_rank, r["id"])
+        (never if r["listen_cnt"] == 0 else heard).append(item)
+    never.sort(key=lambda t: (t[3], t[4], t[5]))
+    heard.sort(key=lambda t: (t[3], t[4], t[5]))
+    heard.sort(key=lambda t: t[2] or "", reverse=True)  # 最近听过优先（稳定排序）
+    return [t[0] for t in never + heard], remaining
 
 
 def listen_queue(conn, limit: int = 100) -> dict:
-    """听学池：未听过优先，同层级按 priority 权重 + 科目顺序编排。"""
+    """听学池：未听过优先，已听按最近听过倒序；返回已听标记与累计进度。"""
     items, remaining = _listen_pool(conn)
-    return {"items": items[:limit], "remaining": remaining}
+    slice_items = items[:limit]
+    heard_total = conn.execute(
+        """
+        SELECT COUNT(DISTINCT r.entry_id) AS n
+        FROM reviews r JOIN entries e ON e.id = r.entry_id
+        WHERE r.mode='listen' AND e.status='final' AND e.tts_text != ''
+        """).fetchone()["n"]
+    return {"items": slice_items, "remaining": remaining,
+            "heard_total": heard_total}
 
 
 def listen_more(conn, exclude: list[str], count: int = 5) -> dict:
     """听学续学：返回当前队列之外的下 N 条（同一排序）。"""
     items, remaining = _listen_pool(conn, set(exclude or []))
-    return {"items": items[:count], "remaining": remaining}
+    slice_items = items[:count]
+    return {"items": slice_items, "remaining": remaining}
 
 
 def ensure_listen_pool(conn, threshold: int = 50) -> bool:
