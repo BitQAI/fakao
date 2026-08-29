@@ -4,6 +4,7 @@
 
 设计：`docs/superpowers/specs/2026-08-27-法考冲刺工具-design.md`
 实施计划：`docs/superpowers/plans/2026-08-27-法考冲刺工具.md`
+AI 操作指南：`AGENTS.md`（供 AI 代理读取：条目生成/补缺/导入/音频/案例挂接/覆盖检查，以及后续拓展条目的方法论）
 
 ## 部署（Ubuntu 22）
 
@@ -24,7 +25,7 @@ git clone <你的仓库地址> /opt/fakao
 cd /opt/fakao
 cp .env.example .env
 vi .env   # 填入 DEEPSEEK_API_KEY
-          # 听学 TTS 另填 DASHSCOPE_API_KEY（千问 qwen3-tts-instruct-flash，音色 Neil）
+          # 听学 TTS 另填 DASHSCOPE_API_KEY（千问 qwen-tts 链，音色 Ethan；TTS_MODELS/TTS_VOICE/TTS_SPEED 可配）
 ```
 
 3. 后端安装与导入数据：
