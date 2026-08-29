@@ -1,3 +1,5 @@
+import subprocess
+
 from app import config
 from app import tts
 
@@ -56,6 +58,7 @@ def test_synth_posts_to_dashscope_and_writes_url_audio(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     monkeypatch.setattr(config, "DASHSCOPE_API_KEY", "sk-test")
     monkeypatch.setattr(config, "TTS_MODELS", ["m1", "m2"])
+    monkeypatch.setattr(config, "TTS_SPEED", 1.0)
     client = _patch_client(monkeypatch)
     out = tts.ensure_mp3("XF-001", "你好")
     payload = client.captured["payload"]
@@ -71,6 +74,7 @@ def test_synth_writes_base64_audio(monkeypatch, tmp_path):
 
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     monkeypatch.setattr(config, "DASHSCOPE_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "TTS_SPEED", 1.0)
 
     class B64Client(FakeClient):
         def post(self, url, json=None, headers=None):
@@ -115,6 +119,7 @@ def test_synth_falls_back_to_next_model(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     monkeypatch.setattr(config, "DASHSCOPE_API_KEY", "sk-test")
     monkeypatch.setattr(config, "TTS_MODELS", ["m1", "m2"])
+    monkeypatch.setattr(config, "TTS_SPEED", 1.0)
     used = []
 
     class FallbackClient(FakeClient):
@@ -151,3 +156,47 @@ def test_batch(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     outs = tts.ensure_batch([("XF-001", "a"), ("XF-002", "b")], dry_run=True)
     assert [p.name for p in outs] == ["XF-001.wav", "XF-002.wav"]
+
+
+def test_slow_down_speed_one_returns_unchanged(monkeypatch):
+    monkeypatch.setattr(config, "TTS_SPEED", 1.0)
+    assert tts._slow_down(b"RAW") == b"RAW"
+
+
+def test_slow_down_runs_ffmpeg_atempo(monkeypatch):
+    monkeypatch.setattr(config, "TTS_SPEED", 0.9)
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout=b"SLOWED")
+
+    monkeypatch.setattr(tts.subprocess, "run", fake_run)
+    assert tts._slow_down(b"RAW") == b"SLOWED"
+    assert captured["args"][:2] == ["ffmpeg", "-y"]
+    assert "atempo=0.900000" in captured["args"]
+
+
+def test_slow_down_falls_back_when_ffmpeg_fails(monkeypatch):
+    monkeypatch.setattr(config, "TTS_SPEED", 0.9)
+
+    def boom(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, ["ffmpeg"])
+
+    monkeypatch.setattr(tts.subprocess, "run", boom)
+    assert tts._slow_down(b"RAW") == b"RAW"
+
+
+def test_ensure_mp3_applies_slow_down(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(config, "DASHSCOPE_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "TTS_MODELS", ["m1"])
+    monkeypatch.setattr(config, "TTS_SPEED", 0.9)
+    _patch_client(monkeypatch)
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout=b"SLOWED")
+
+    monkeypatch.setattr(tts.subprocess, "run", fake_run)
+    out = tts.ensure_mp3("XF-001", "你好")
+    assert out.read_bytes() == b"SLOWED"

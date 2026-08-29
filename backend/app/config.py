@@ -30,9 +30,10 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 TTS_MODELS = [m.strip() for m in os.getenv(
     "TTS_MODELS",
-    "qwen-tts-latest,qwen-tts,qwen-tts-2025-05-22,qwen-tts-2025-04-10",
+    "qwen-tts,qwen-tts-2025-05-22,qwen-tts-2025-04-10",
 ).split(",") if m.strip()]
 TTS_VOICE = os.getenv("TTS_VOICE", "Ethan")
+TTS_SPEED = float(os.getenv("TTS_SPEED", "1.0"))  # 语速倍数，1.0 正常，<1 变慢
 
 DATA_DIR = Path(os.getenv("FAKAO_DATA_DIR", str(ROOT_DIR / "data")))
 DB_PATH = DATA_DIR / "fakao.db"
