@@ -117,9 +117,12 @@ def generate_morning_report(plan: dict, stats: dict) -> str:
 def generate_quiz(entry: dict) -> dict | None:
     text = call_llm(
         SYSTEM_COACH,
-        "根据该条目出一道法考客观题风格单选题（题干用场景，正确项来自结论句，"
-        "干扰项来自易混淆情形）。只输出 JSON："
-        '{"stem": "...", "options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": "A"}',
+        "根据该条目出一道法考客观题（题干用场景，正确项来自结论句，"
+        "干扰项来自易混淆情形）。约 1/3 出多选题（答案 2~3 个字母），其余单选。"
+        "必须附带 30~60 字解析。只输出 JSON："
+        '{"qtype": "choice"|"multi", "stem": "...", '
+        '"options": ["A. ...", "B. ...", "C. ...", "D. ..."], '
+        '"answer": "A"|"AB", "analysis": "..."}',
         temperature=0.5,
         max_tokens=400,
     )
@@ -132,8 +135,43 @@ def generate_quiz(entry: dict) -> dict | None:
         data = json.loads(cleaned)
         if not (data.get("stem") and len(data.get("options", [])) >= 2 and data.get("answer")):
             return None
-        data["qtype"] = "choice"
+        answer = data["answer"].strip().upper()
+        letters = sorted(set(answer))
+        qtype = data.get("qtype")
+        if qtype not in {"choice", "multi"}:
+            qtype = "multi" if len(letters) > 1 else "choice"
+        if not all(0 <= ord(ch) - 65 < len(data["options"]) for ch in letters):
+            return None
+        if qtype == "multi" and len(letters) < 2:
+            qtype = "choice"
+        data["qtype"] = qtype
+        data["answer"] = "".join(letters)
+        data["analysis"] = (data.get("analysis") or "").strip() \
+            or f"正确答案：{''.join(letters)}。"
         return data
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def generate_quiz_analysis(quiz: dict) -> str | None:
+    """为存量旧题补生成解析；失败返回 None（调用方给兜底文案）。"""
+    text = call_llm(
+        SYSTEM_COACH,
+        "为这道法考题目写 30~60 字解析（说明正确项为何对、易错项为何错），只输出 JSON："
+        '{"analysis": "..."}\n题目：'
+        + json.dumps({k: quiz.get(k) for k in ("stem", "options", "answer")},
+                     ensure_ascii=False),
+        temperature=0.3,
+        max_tokens=200,
+    )
+    if not text:
+        return None
+    try:
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1].rsplit("```", 1)[0]
+        data = json.loads(cleaned)
+        return (data.get("analysis") or "").strip() or None
     except Exception:  # noqa: BLE001
         return None
 
@@ -142,7 +180,8 @@ def cloze_quiz(entry: dict) -> dict:
     conclusion = entry["conclusion"]
     tail_len = 6 if len(conclusion) > 8 else 0
     stem = f"{entry['anchor']}。请补全结论：{conclusion[:-tail_len]}____"
-    return {"qtype": "cloze", "stem": stem, "options": [], "answer": conclusion}
+    return {"qtype": "cloze", "stem": stem, "options": [],
+            "answer": conclusion, "analysis": conclusion}
 
 
 def generate_talk(subject: str, entries: list[dict]) -> str | None:

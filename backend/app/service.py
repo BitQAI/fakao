@@ -143,6 +143,58 @@ def plan_payload(conn, day: str) -> dict:
             "items": detail, "counts": counts}
 
 
+def continue_plan_entries(conn, count: int = 5) -> list[dict]:
+    """看背续学：今日计划之外的候选条目，按 错题>复习>新学 > 优先级 > 科目顺序 取前 N。"""
+    day = date.today().isoformat()
+    plan = plan_payload(conn, day)
+    plan_ids = {it["id"] for it in plan["items"]}
+    rows = conn.execute(
+        """
+        SELECT e.id, e.subject, e.submodule, e.point, e.priority,
+               (SELECT r.ts FROM reviews r WHERE r.entry_id=e.id
+                ORDER BY r.ts DESC LIMIT 1) AS last_ts,
+               (SELECT r.result FROM reviews r WHERE r.entry_id=e.id
+                ORDER BY r.ts DESC LIMIT 1) AS last_result,
+               EXISTS(SELECT 1 FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id
+                      WHERE q.entry_id=e.id AND qa.correct=0) AS wrong_ever
+        FROM entries e WHERE e.status='final'
+        """
+    ).fetchall()
+    bucket_rank = {"retry": 0, "review": 1, "new": 2}
+    states = []
+    for r in rows:
+        if r["id"] in plan_ids:
+            continue
+        st = scheduler.classify(r["id"], r["subject"], r["submodule"], r["point"],
+                                r["priority"], r["last_ts"], r["last_result"],
+                                bool(r["wrong_ever"]), day)
+        if st is not None:
+            states.append(st)
+    states.sort(key=lambda s: (
+        bucket_rank[s.bucket],
+        scheduler.PRIORITY_ORDER.get(s.priority, 9),
+        scheduler.SUBJECT_ORDER.index(s.subject)
+        if s.subject in scheduler.SUBJECT_ORDER else len(scheduler.SUBJECT_ORDER),
+        s.entry_id,
+    ))
+    selected = [s.entry_id for s in states[:count]]
+    bucket_by_id = {s.entry_id: s.bucket for s in states}
+    items = []
+    if selected:
+        placeholders = ",".join("?" * len(selected))
+        by_id = {}
+        for r in conn.execute(
+            f"SELECT * FROM entries WHERE id IN ({placeholders})", selected
+        ).fetchall():
+            by_id[r["id"]] = _entry_dict(r)
+        for eid in selected:
+            e = by_id.get(eid)
+            if e is not None:
+                e["bucket"] = bucket_by_id.get(eid, "new")
+                items.append(e)
+    return items
+
+
 def record_review(conn, entry_id: str, mode: str, result: str,
                   duration_sec: int = 0) -> None:
     conn.execute(
@@ -233,22 +285,32 @@ def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict
         if entry is None:
             continue
         cached = conn.execute(
-            "SELECT id, qtype, stem, options, answer FROM quizzes "
+            "SELECT id, qtype, stem, options, answer, analysis FROM quizzes "
             "WHERE entry_id=? AND date(created_at)=?", (entry_id, day)
         ).fetchone()
         if cached:
             quiz = {"id": cached["id"], "entry_id": entry_id,
                     "qtype": cached["qtype"], "stem": cached["stem"],
                     "options": json.loads(cached["options"] or "[]"),
-                    "answer": cached["answer"]}
+                    "answer": cached["answer"], "analysis": cached["analysis"] or ""}
+            if not quiz["analysis"]:
+                analysis = ai.generate_quiz_analysis(quiz) or ""
+                if not analysis:
+                    ans = quiz["answer"].strip().upper()
+                    analysis = (f"正确答案：{ans}。" if quiz["qtype"] == "choice"
+                                else quiz["answer"])
+                quiz["analysis"] = analysis
+                conn.execute("UPDATE quizzes SET analysis=? WHERE id=?",
+                             (analysis, quiz["id"]))
         else:
             quiz = ai.generate_quiz(entry) or ai.cloze_quiz(entry)
             cur = conn.execute(
-                "INSERT INTO quizzes (entry_id, qtype, stem, options, answer, created_at) "
-                "VALUES (?,?,?,?,?,?)",
+                "INSERT INTO quizzes (entry_id, qtype, stem, options, answer, analysis, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (entry_id, quiz["qtype"], quiz["stem"],
                  json.dumps(quiz["options"], ensure_ascii=False),
-                 quiz["answer"], datetime.now().isoformat(timespec="seconds")),
+                 quiz["answer"], quiz.get("analysis", ""),
+                 datetime.now().isoformat(timespec="seconds")),
             )
             quiz = {**quiz, "id": cur.lastrowid, "entry_id": entry_id}
         out.append(quiz)
@@ -373,8 +435,9 @@ def record_chat(conn, question: str, answer: str,
     conn.commit()
 
 
-def listen_queue(conn, limit: int = 100) -> dict:
-    """听学池：未听过优先，同层级按 priority 权重 + 科目顺序编排。"""
+def _listen_pool(conn, exclude: set[str] | None = None):
+    """听学池排序（未听过优先，同层级按 priority 权重 + 科目顺序），可排除 id 集合。"""
+    exclude = exclude or set()
     rows = conn.execute(
         """
         SELECT e.*,
@@ -392,6 +455,8 @@ def listen_queue(conn, limit: int = 100) -> dict:
         """).fetchone()["n"]
     decorated = []
     for r in rows:
+        if r["id"] in exclude:
+            continue
         e = _entry_dict(r)
         subject_rank = (scheduler.SUBJECT_ORDER.index(r["subject"])
                         if r["subject"] in scheduler.SUBJECT_ORDER
@@ -400,7 +465,19 @@ def listen_queue(conn, limit: int = 100) -> dict:
                           scheduler.PRIORITY_ORDER.get(r["priority"], 9),
                           subject_rank, r["id"]))
     decorated.sort(key=lambda t: (t[1], t[2], t[3], t[4]))
-    return {"items": [t[0] for t in decorated[:limit]], "remaining": remaining}
+    return [t[0] for t in decorated], remaining
+
+
+def listen_queue(conn, limit: int = 100) -> dict:
+    """听学池：未听过优先，同层级按 priority 权重 + 科目顺序编排。"""
+    items, remaining = _listen_pool(conn)
+    return {"items": items[:limit], "remaining": remaining}
+
+
+def listen_more(conn, exclude: list[str], count: int = 5) -> dict:
+    """听学续学：返回当前队列之外的下 N 条（同一排序）。"""
+    items, remaining = _listen_pool(conn, set(exclude or []))
+    return {"items": items[:count], "remaining": remaining}
 
 
 def ensure_listen_pool(conn, threshold: int = 50) -> bool:

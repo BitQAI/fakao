@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS quizzes (
   stem       TEXT NOT NULL,
   options    TEXT NOT NULL DEFAULT '[]',
   answer     TEXT NOT NULL,
+  analysis   TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 
@@ -104,6 +105,10 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA_SQL)
+    # 轻量迁移：存量库补齐 quizzes.analysis 列（本仓库无 Alembic，用幂等 ALTER）
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(quizzes)").fetchall()}
+    if "analysis" not in cols:
+        conn.execute("ALTER TABLE quizzes ADD COLUMN analysis TEXT NOT NULL DEFAULT ''")
     conn.commit()
     return conn
 

@@ -76,6 +76,7 @@ export interface QuizQuestion {
   stem: string;
   options: string[];
   answer: string;
+  analysis?: string;
 }
 
 export interface CoverageNode {
