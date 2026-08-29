@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { getJson, postJson } from "@/lib/api";
 import { mdToHtml } from "@/lib/md";
 import CoverageTree from "@/components/CoverageTree";
+import HistoryView from "@/components/HistoryView";
+import LeaderboardView from "@/components/LeaderboardView";
 import type { CoverageTree as Tree, Report, Stats, TodayPayload } from "@/lib/types";
 
 export default function ReportPage() {
@@ -31,6 +33,8 @@ export default function ReportPage() {
       <div className="segments">
         <button className={`segment${view === "review" ? " active" : ""}`} onClick={() => setView("review")}>复盘</button>
         <button className={`segment${view === "coverage" ? " active" : ""}`} onClick={() => setView("coverage")}>覆盖</button>
+        <button className={`segment${view === "history" ? " active" : ""}`} onClick={() => setView("history")}>历史</button>
+        <button className={`segment${view === "leaderboard" ? " active" : ""}`} onClick={() => setView("leaderboard")}>排行</button>
       </div>
 
       {view === "review" && (
@@ -64,6 +68,10 @@ export default function ReportPage() {
       {view === "coverage" && (
         tree ? <CoverageTree tree={tree} /> : <p className="muted">加载中…</p>
       )}
+
+      {view === "history" && <HistoryView />}
+
+      {view === "leaderboard" && <LeaderboardView />}
     </div>
   );
 }
