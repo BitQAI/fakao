@@ -17,6 +17,12 @@ class ListenMoreIn(BaseModel):
     exclude: list[str] = []
 
 
+class CustomRangeIn(BaseModel):
+    subjects: list[str] = []
+    points: list[str] = []
+    limit: int = Field(default=200, ge=1, le=500)
+
+
 @router.get("/plans/today")
 def get_today_plan(conn=Depends(db.get_db)):
     return service.ensure_today_plan(conn, date.today().isoformat())
@@ -45,3 +51,18 @@ def continue_plan(payload: ContinuePlanIn, conn=Depends(db.get_db)):
 @router.post("/listen/more")
 def listen_more(payload: ListenMoreIn, conn=Depends(db.get_db)):
     return service.listen_more(conn, payload.exclude, payload.count)
+
+
+@router.post("/plans/custom")
+def custom_plan(payload: CustomRangeIn, conn=Depends(db.get_db)):
+    return {"items": service.custom_entries(
+        conn, payload.subjects, payload.points, payload.limit)}
+
+
+@router.post("/listen/custom")
+def custom_listen(payload: CustomRangeIn, conn=Depends(db.get_db)):
+    items = service.custom_entries(
+        conn, payload.subjects, payload.points, min(payload.limit, 100),
+        listen_only=True)
+    return {"items": items, "remaining": len(items),
+            "generating": False, "custom": True}

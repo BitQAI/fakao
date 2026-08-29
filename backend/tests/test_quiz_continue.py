@@ -186,3 +186,62 @@ def test_listen_more_excludes(tmp_path, monkeypatch):
     data = r.json()
     assert "remaining" in data
     assert all(it["id"] != "XF-001" for it in data["items"])
+
+
+def test_custom_plan_by_subject(tmp_path, monkeypatch):
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final",
+        "generated_at": "x", "count": 1, "entries": [_entry2()],
+    })
+    conn.commit()
+    conn.close()
+    data = client.post("/api/plans/custom", json={"subjects": ["刑法"]}).json()
+    ids = [it["id"] for it in data["items"]]
+    assert ids == ["XF-001", "XF-002"]
+    assert all(it["subject"] == "刑法" for it in data["items"])
+
+
+def test_custom_plan_by_points(tmp_path, monkeypatch):
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final",
+        "generated_at": "x", "count": 1, "entries": [_entry2()],
+    })
+    conn.commit()
+    conn.close()
+    data = client.post("/api/plans/custom",
+                       json={"points": ["正当防卫限度"]}).json()
+    assert [it["id"] for it in data["items"]] == ["XF-002"]
+
+
+def test_custom_empty_selection(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path, monkeypatch)
+    data = client.post("/api/plans/custom", json={}).json()
+    assert data["items"] == []
+
+
+def test_custom_listen_filters_audio(tmp_path, monkeypatch):
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final",
+        "generated_at": "x", "count": 1, "entries": [_entry2()],
+    })
+    # 直接插入一条无音频文本的条目（绕过 importer 必填校验），验证听学过滤
+    conn.execute(
+        "INSERT INTO entries (id, subject, submodule, point, anchor, conclusion, "
+        "priority, rationale, sources, cases, statutes, note, tts_text, status) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("XF-003", "刑法", "总则-犯罪形态", "犯罪中止",
+         "甲投毒后心生悔意送医救回，成立犯罪中止的认定",
+         "成立犯罪中止。", "高频考点", "高频",
+         "[]", "[]", "[]", None, "", "final"),
+    )
+    conn.commit()
+    conn.close()
+    data = client.post("/api/listen/custom", json={"subjects": ["刑法"]}).json()
+    assert data["custom"] is True
+    assert [it["id"] for it in data["items"]] == ["XF-001", "XF-002"]

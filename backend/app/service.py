@@ -195,6 +195,35 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
     return items
 
 
+def custom_entries(conn, subjects: list[str] | None = None,
+                   points: list[str] | None = None, limit: int = 200,
+                   listen_only: bool = False) -> list[dict]:
+    """自定义学习范围：科目/知识点并集过滤，优先级×科目顺序排序，可限制只取可听条目。"""
+    subjects = [s for s in (subjects or []) if s]
+    points = [p for p in (points or []) if p]
+    if not subjects and not points:
+        return []
+    filters = []
+    if subjects:
+        filters.append(f"e.subject IN ({','.join('?' * len(subjects))})")
+    if points:
+        filters.append(f"e.point IN ({','.join('?' * len(points))})")
+    sql = "SELECT * FROM entries e WHERE e.status='final'"
+    if filters:
+        sql += " AND (" + " OR ".join(filters) + ")"
+    if listen_only:
+        sql += " AND e.tts_text != ''"
+    rows = conn.execute(sql, subjects + points).fetchall()
+    items = [_entry_dict(r) for r in rows]
+    items.sort(key=lambda e: (
+        scheduler.PRIORITY_ORDER.get(e["priority"], 9),
+        scheduler.SUBJECT_ORDER.index(e["subject"])
+        if e["subject"] in scheduler.SUBJECT_ORDER else len(scheduler.SUBJECT_ORDER),
+        e["id"],
+    ))
+    return items[:limit]
+
+
 def record_review(conn, entry_id: str, mode: str, result: str,
                   duration_sec: int = 0) -> None:
     conn.execute(
