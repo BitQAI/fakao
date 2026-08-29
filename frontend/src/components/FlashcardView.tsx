@@ -10,6 +10,8 @@ export default function FlashcardView() {
   const [flipped, setFlipped] = useState(false);
   const [done, setDone] = useState(0);
   const [error, setError] = useState("");
+  const [continueCount, setContinueCount] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
   const [source, setSource] = useState<SourceTarget | null>(null);
   const [statute, setStatute] = useState<string | null>(null);
   const startRef = useRef(Date.now());
@@ -32,11 +34,45 @@ export default function FlashcardView() {
       <div className="card center">
         <h2>今日卡片已看完</h2>
         <p className="muted">共 {items.length} 张，已记录自评。</p>
+        <div className="continue-box">
+          <p className="muted">还想继续学？选择数量：</p>
+          <div className="row">
+            <button className="btn" disabled={loadingMore}
+              onClick={() => void loadMore(5)}>继续 5 个</button>
+            <button className="btn" disabled={loadingMore}
+              onClick={() => void loadMore(10)}>继续 10 个</button>
+          </div>
+          <div className="continue-custom">
+            <input
+              type="number" min={1} max={50} placeholder="自定义数量"
+              value={continueCount}
+              onChange={(e) => setContinueCount(e.target.value)}
+            />
+            <button className="btn btn-primary" disabled={loadingMore || !continueCount}
+              onClick={() => void loadMore(Number(continueCount))}>继续</button>
+          </div>
+        </div>
       </div>
     );
   }
 
   const entry: Entry = items[index];
+
+  async function loadMore(count: number) {
+    if (count < 1 || count > 50) return;
+    setLoadingMore(true);
+    try {
+      const r = await postJson<{ items: Entry[] }>("/api/plans/continue", { count });
+      if (!r.items.length) return;
+      setPlan((p) => (p ? { ...p, items: [...p.items, ...r.items] } : p));
+      setIndex(items.length);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoadingMore(false);
+      setContinueCount("");
+    }
+  }
 
   async function rate(result: "good" | "fuzzy" | "bad") {
     const duration = Math.round((Date.now() - startRef.current) / 1000);
@@ -91,7 +127,7 @@ export default function FlashcardView() {
                 {entry.cases.map((c, i) => (
                   <button
                     key={i}
-                    className="chip"
+                    className="chip-case"
                     onClick={(e) => {
                       e.stopPropagation();
                       setSource({ kind: "case", ref: c.source, loc: c.loc });
