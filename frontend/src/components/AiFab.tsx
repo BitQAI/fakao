@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import AiChat from "./AiChat";
+import { IconAi } from "./icons";
 
 export default function AiFab() {
   const [open, setOpen] = useState(false);
@@ -18,7 +19,9 @@ export default function AiFab() {
 
   return (
     <>
-      <button className="ai-fab" onClick={() => setOpen((o) => !o)}>AI</button>
+      <button className="ai-fab" onClick={() => setOpen((o) => !o)} aria-label="AI 助手">
+        <IconAi />
+      </button>
       <AiChat open={open} onClose={() => setOpen(false)} prefill={prefill} />
     </>
   );
