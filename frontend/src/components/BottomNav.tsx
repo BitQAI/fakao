@@ -1,12 +1,13 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { IconMine, IconReport, IconStudy, IconToday } from "./icons";
 
 const TABS = [
-  { href: "/", label: "今日", icon: "◷" },
-  { href: "/study", label: "学习", icon: "▤" },
-  { href: "/report", label: "报告", icon: "▥" },
-  { href: "/settings", label: "我的", icon: "⚙" },
+  { href: "/", label: "今日", Icon: IconToday },
+  { href: "/study", label: "学习", Icon: IconStudy },
+  { href: "/report", label: "报告", Icon: IconReport },
+  { href: "/settings", label: "我的", Icon: IconMine },
 ];
 
 export default function BottomNav() {
@@ -17,7 +18,7 @@ export default function BottomNav() {
         const active = pathname === t.href;
         return (
           <Link key={t.href} href={t.href} className={`nav-item${active ? " active" : ""}`}>
-            <span className="nav-icon">{t.icon}</span>
+            <span className="nav-icon"><t.Icon /></span>
             <span className="nav-label">{t.label}</span>
           </Link>
         );

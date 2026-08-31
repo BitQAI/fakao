@@ -266,59 +266,6 @@ def record_review(conn, entry_id: str, mode: str, result: str,
     conn.commit()
 
 
-def _weak_submodule(conn) -> str | None:
-    tree = coverage_payload(conn)
-    best = None
-    for subject, sdata in tree.items():
-        for sub, subdata in sdata["submodules"].items():
-            weak = subdata["states"].get("weak", 0)
-            if weak and (best is None or weak > best[1]):
-                best = (f"{subject}·{sub}", weak)
-    return best[0] if best else None
-
-
-def today_stats(conn, day: str | None = None) -> dict:
-    day = day or date.today().isoformat()
-    plan = plan_payload(conn, day)
-    done = conn.execute(
-        "SELECT COUNT(*) AS n FROM reviews WHERE mode='read' AND date(ts)=?",
-        (day,),
-    ).fetchone()["n"]
-    quiz = conn.execute(
-        "SELECT COUNT(*) AS total, COALESCE(SUM(correct),0) AS correct "
-        "FROM quiz_answers WHERE date(ts)=?", (day,),
-    ).fetchone()
-    listen = conn.execute(
-        "SELECT COALESCE(SUM(duration_sec),0) AS s FROM reviews "
-        "WHERE mode='listen' AND date(ts)=?", (day,),
-    ).fetchone()["s"]
-    quota = plan["quota"] or 0
-    percent = round(done / quota * 100) if quota else 0
-    return {
-        "date": day, "done": done, "quota": quota, "percent": percent,
-        "quiz_total": quiz["total"], "quiz_correct": quiz["correct"],
-        "listen_min": round(listen / 60), "counts": plan["counts"],
-        "weak": _weak_submodule(conn) or "暂无",
-        "days_left": days_left(conn, day),
-    }
-
-
-def coverage_payload(conn) -> dict:
-    rows = conn.execute(
-        "SELECT subject, submodule, point, "
-        "(SELECT r.result FROM reviews r WHERE r.entry_id=e.id "
-        " ORDER BY r.ts DESC LIMIT 1) AS last_result, "
-        "(SELECT COUNT(*) FROM reviews r WHERE r.entry_id=e.id) AS review_count "
-        "FROM entries e"
-    ).fetchall()
-    items = [
-        {"subject": r["subject"], "submodule": r["submodule"],
-         "point": r["point"], "state": cov.entry_state(r["last_result"], r["review_count"])}
-        for r in rows
-    ]
-    return cov.coverage_tree(items)
-
-
 def latest_report(conn, kind: str) -> dict | None:
     row = conn.execute(
         "SELECT id, date, kind, content, created_at FROM reports "
@@ -336,6 +283,8 @@ def save_report(conn, day: str, kind: str, content: str) -> None:
 
 
 def morning_report(conn, day: str | None = None) -> dict | None:
+    from app.stats import today_stats
+
     day = day or date.today().isoformat()
     existing = latest_report(conn, "morning")
     if existing and existing["date"] == day:
@@ -353,6 +302,8 @@ def morning_report(conn, day: str | None = None) -> dict | None:
 
 
 def evening_report(conn, day: str | None = None, force: bool = False) -> dict | None:
+    from app.stats import today_stats
+
     day = day or date.today().isoformat()
     existing = latest_report(conn, "evening")
     if existing and existing["date"] == day and not force:

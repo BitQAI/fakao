@@ -44,6 +44,7 @@ export interface Stats {
   done: number;
   quota: number;
   percent: number;
+  over_done: boolean;
   quiz_total: number;
   quiz_correct: number;
   listen_min: number;
@@ -64,6 +65,7 @@ export interface TodayPayload {
   days_left: number | null;
   plan: Plan;
   stats: Stats;
+  streak: { current: number; longest: number };
   morning_report: Report | null;
 }
 
@@ -107,6 +109,42 @@ export interface LeaderboardItem {
   read_repeat: number;
   listen_repeat: number;
   last_ts: string | null;
+}
+
+export interface MarkItem {
+  id: number;
+  entry_id: string;
+  created_at: string;
+  entry: Entry;
+}
+
+export interface WrongbookItem {
+  id: string;
+  subject: string;
+  submodule: string;
+  point: string;
+  anchor: string;
+  conclusion: string;
+  priority: string;
+  quiz_wrong_count: number;
+  bad_count: number;
+  wrong_count: number;
+  last_wrong_ts: string | null;
+}
+
+export interface DailyStat {
+  date: string;
+  read: number;
+  listen: number;
+  quiz: number;
+}
+
+export interface StatsOverview {
+  days: number;
+  daily: DailyStat[];
+  totals: { read: number; listen: number; quiz: number; minutes: number };
+  mastery: Record<string, number>;
+  streak: { current: number; longest: number };
 }
 
 export interface QuizQuestion {

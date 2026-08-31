@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./components.css";
 import BottomNav from "@/components/BottomNav";
 import AiFab from "@/components/AiFab";
 

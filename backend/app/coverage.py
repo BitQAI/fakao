@@ -1,10 +1,21 @@
-"""覆盖树聚合（纯函数）：科目 → 子科目 → 考点，按学习状态着色。"""
+"""覆盖树聚合（纯函数）：科目 → 子科目 → 考点，按学习状态着色。
+
+状态口径与 scheduler 对齐（spec 2026-08-31）：
+- new 未学：无 read/listen/quiz 任何记录
+- weak 薄弱：命中 retry 桶（最近 result=bad 或 quiz 曾答错）
+- mastered 掌握：最近 result=good 且 read 次数 >= 2
+- learned 已学：其余有记录
+"""
 
 
-def entry_state(last_result: str | None, review_count: int) -> str:
-    if last_result is None:
+def entry_state(last_result: str | None, review_count: int,
+                quiz_wrong: bool = False,
+                has_record: bool | None = None) -> str:
+    if has_record is None:
+        has_record = last_result is not None or review_count > 0
+    if not has_record:
         return "new"
-    if last_result == "bad":
+    if quiz_wrong or last_result == "bad":
         return "weak"
     if last_result == "good" and review_count >= 2:
         return "mastered"

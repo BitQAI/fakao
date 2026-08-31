@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { getJson } from "@/lib/api";
 import { mdToHtml } from "@/lib/md";
 
@@ -33,6 +34,9 @@ export default function SourceViewer({
   const [data, setData] = useState<SourceData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!source && !statute) return;
@@ -50,7 +54,8 @@ export default function SourceViewer({
   }, [source, statute]);
 
   if (!source && !statute) return null;
-  return (
+  if (!mounted) return null;
+  return createPortal((
     <div className="source-modal" onClick={onClose}>
       <div className="source-panel" onClick={(e) => e.stopPropagation()}>
         <div className="ai-chat-head">
@@ -69,5 +74,5 @@ export default function SourceViewer({
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }

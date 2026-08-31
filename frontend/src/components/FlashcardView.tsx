@@ -23,6 +23,7 @@ export default function FlashcardView() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customMode, setCustomMode] = useState(false);
+  const [queueLabel, setQueueLabel] = useState("");
   const [customRange, setCustomRange] = useState<CustomRange | null>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
   const [remaining, setRemaining] = useState(0);
@@ -32,6 +33,22 @@ export default function FlashcardView() {
 
   useEffect(() => {
     const entryParam = searchParams.get("entry");
+    const queueParam = searchParams.get("queue");
+    if (queueParam === "wrong") {
+      getJson<{ items: Entry[] }>("/api/wrongbook/queue?limit=30")
+        .then((r) => {
+          setPlan({
+            date: "", quota: r.items.length, rationale: "错题重练",
+            items: r.items, counts: { retry: r.items.length, review: 0, new: 0 },
+          });
+          setReviewedToday(new Set(r.items.filter((i) => i.reviewed_today).map((i) => i.id)));
+          setCustomMode(true);
+          setQueueLabel("错题重练");
+          setIndex(0);
+        })
+        .catch((e) => setError(String(e)));
+      return;
+    }
     getJson<Plan>("/api/plans/today")
       .then((p) => {
         setReviewedToday(new Set(p.items.filter((i) => i.reviewed_today).map((i) => i.id)));
@@ -86,17 +103,23 @@ export default function FlashcardView() {
   if (index >= items.length) {
     return (
       <div className="card center">
-        <h2>{customMode ? "自定义范围已学完" : "今日卡片已看完"}</h2>
+        <h2>{queueLabel ? `${queueLabel}完成` : customMode ? "自定义范围已学完" : "今日卡片已看完"}</h2>
         <p className="muted">
           共 {items.length} 张 · 今日累计 {reviewedToday.size} 条，已记录自评。
         </p>
         {customMode ? (
           <div>
-            <div className="row">
-              <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
-                重新选择范围
-              </button>
-            </div>
+            {queueLabel ? (
+              <div className="row">
+                <a className="btn btn-primary" href="/study?view=wrong">回到错题本</a>
+              </div>
+            ) : (
+              <div className="row">
+                <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
+                  重新选择范围
+                </button>
+              </div>
+            )}
             {customRange && remaining > 0 ? (
               <div className="continue-box">
                 <p className="muted">剩余未学 {remaining} 条，选择下一组或部分：</p>
