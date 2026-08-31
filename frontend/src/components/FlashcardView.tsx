@@ -23,6 +23,9 @@ export default function FlashcardView() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customMode, setCustomMode] = useState(false);
+  const [customRange, setCustomRange] = useState<CustomRange | null>(null);
+  const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
+  const [remaining, setRemaining] = useState(0);
   const [source, setSource] = useState<SourceTarget | null>(null);
   const [statute, setStatute] = useState<string | null>(null);
   const startRef = useRef(Date.now());
@@ -88,10 +91,41 @@ export default function FlashcardView() {
           共 {items.length} 张 · 今日累计 {reviewedToday.size} 条，已记录自评。
         </p>
         {customMode ? (
-          <div className="row">
-            <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
-              重新选择范围
-            </button>
+          <div>
+            <div className="row">
+              <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
+                重新选择范围
+              </button>
+            </div>
+            {customRange && remaining > 0 ? (
+              <div className="continue-box">
+                <p className="muted">剩余未学 {remaining} 条，选择下一组或部分：</p>
+                <div className="row">
+                  <button className="btn" disabled={loadingMore}
+                    onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: 20 })}>
+                    下一组 20
+                  </button>
+                  <button className="btn" disabled={loadingMore}
+                    onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: 50 })}>
+                    下一组 50
+                  </button>
+                </div>
+                <div className="continue-custom">
+                  <input
+                    type="number" min={1} max={50} placeholder="自定义数量"
+                    value={continueCount}
+                    onChange={(e) => setContinueCount(e.target.value)}
+                  />
+                  <button className="btn btn-primary" disabled={loadingMore || !continueCount}
+                    onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: Number(continueCount) })}>
+                    继续
+                  </button>
+                </div>
+                {notice && <p className="muted">{notice}</p>}
+              </div>
+            ) : (
+              <p className="muted">所选范围已全部学完，可重新选择范围继续学习。</p>
+            )}
           </div>
         ) : (
           <div className="continue-box">
@@ -119,15 +153,21 @@ export default function FlashcardView() {
 
   const entry: Entry = items[index];
 
-  async function applyCustom(range: CustomRange) {
+  async function applyCustom(range: CustomRange,
+                             opts?: { exclude?: string[]; limit?: number }) {
     setLoadingMore(true);
     setNotice("");
     try {
-      const r = await postJson<{ items: Entry[] }>("/api/plans/custom", {
+      const r = await postJson<{ items: Entry[]; total: number }>("/api/plans/custom", {
         subjects: range.subjects, points: range.points,
+        limit: opts?.limit ?? 200,
+        exclude: opts?.exclude ?? [],
       });
       if (!r.items.length) {
-        setNotice("所选范围暂无条目，请重新选择。");
+        if (opts?.exclude?.length) setRemaining(0);
+        setNotice(opts?.exclude?.length
+          ? "剩余已全部学完。"
+          : "所选范围暂无条目，请重新选择。");
         return;
       }
       setPlan({
@@ -135,6 +175,9 @@ export default function FlashcardView() {
         items: r.items, counts: { retry: 0, review: 0, new: r.items.length },
       });
       setReviewedToday(new Set(r.items.filter((i) => i.reviewed_today).map((i) => i.id)));
+      setSeenIds(new Set([...(opts?.exclude ?? []), ...r.items.map((i) => i.id)]));
+      setRemaining(Math.max(0, r.total - r.items.length));
+      setCustomRange(range);
       setIndex(0);
       setDone(0);
       setFlipped(false);
@@ -277,6 +320,24 @@ export default function FlashcardView() {
             onClick={() => rate("good")}>{submitting ? "保存中…" : "记住了"}</button>
         </div>
       )}
+      <div className="row">
+        <button className="btn btn-ghost" disabled={index === 0 || submitting}
+          onClick={() => {
+            setFlipped(false);
+            startRef.current = Date.now();
+            setIndex((i) => Math.max(0, i - 1));
+          }}>
+          上一个
+        </button>
+        <button className="btn btn-ghost" disabled={submitting}
+          onClick={() => {
+            setFlipped(false);
+            startRef.current = Date.now();
+            setIndex((i) => Math.min(items.length, i + 1));
+          }}>
+          下一个
+        </button>
+      </div>
       <SourceViewer
         source={source}
         statute={statute}

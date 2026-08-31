@@ -212,24 +212,34 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
 
 
 def custom_entries(conn, subjects: list[str] | None = None,
-                   points: list[str] | None = None, limit: int = 200,
-                   listen_only: bool = False) -> list[dict]:
-    """自定义学习范围：科目/知识点并集过滤，优先级×科目顺序排序，可限制只取可听条目。"""
+                   points: list[str] | None = None, limit: int | None = None,
+                   listen_only: bool = False,
+                   exclude: list[str] | None = None) -> list[dict]:
+    """自定义学习范围：科目/知识点并集过滤，优先级×科目顺序排序。
+
+    limit 仅作安全上限；调用方如需分批取数，可自行按返回列表切片并传 exclude。
+    """
     subjects = [s for s in (subjects or []) if s]
     points = [p for p in (points or []) if p]
+    exclude = [x for x in (exclude or []) if x]
     if not subjects and not points:
         return []
-    filters = []
+    union = []
     if subjects:
-        filters.append(f"e.subject IN ({','.join('?' * len(subjects))})")
+        union.append(f"e.subject IN ({','.join('?' * len(subjects))})")
     if points:
-        filters.append(f"e.point IN ({','.join('?' * len(points))})")
-    sql = "SELECT * FROM entries e WHERE e.status='final'"
-    if filters:
-        sql += " AND (" + " OR ".join(filters) + ")"
+        union.append(f"e.point IN ({','.join('?' * len(points))})")
+    conds = []
+    if union:
+        conds.append("(" + " OR ".join(union) + ")")
     if listen_only:
-        sql += " AND e.tts_text != ''"
-    rows = conn.execute(sql, subjects + points).fetchall()
+        conds.append("e.tts_text != ''")
+    if exclude:
+        conds.append(f"e.id NOT IN ({','.join('?' * len(exclude))})")
+    sql = "SELECT * FROM entries e WHERE e.status='final'"
+    if conds:
+        sql += " AND " + " AND ".join(conds)
+    rows = conn.execute(sql, subjects + points + exclude).fetchall()
     items = [_entry_dict(r) for r in rows]
     items.sort(key=lambda e: (
         scheduler.PRIORITY_ORDER.get(e["priority"], 9),
@@ -237,10 +247,12 @@ def custom_entries(conn, subjects: list[str] | None = None,
         if e["subject"] in scheduler.SUBJECT_ORDER else len(scheduler.SUBJECT_ORDER),
         e["id"],
     ))
+    if limit is not None:
+        items = items[:limit]
     return review_stats.attach_reviewed_today(
         conn,
         review_stats.attach_listen_counts(
-            conn, review_stats.attach_read_counts(conn, items[:limit])))
+            conn, review_stats.attach_read_counts(conn, items)))
 
 
 def record_review(conn, entry_id: str, mode: str, result: str,

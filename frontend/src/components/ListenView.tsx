@@ -2,7 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getJson, postJson } from "@/lib/api";
-import { readSavedQueue, writeSavedQueue } from "@/lib/progressStore";
+import {
+  readSavedQueue, writeSavedQueue,
+  readMarked, writeMarked, toggleMarkedItem,
+  type MarkedItem,
+} from "@/lib/progressStore";
 import type { Entry, ListenPayload } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
@@ -21,6 +25,12 @@ export default function ListenView() {
   const [moreCount, setMoreCount] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [marksOpen, setMarksOpen] = useState(false);
+  const [marked, setMarked] = useState<MarkedItem[]>([]);
+  const [customRange, setCustomRange] = useState<CustomRange | null>(null);
+  const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
+  const [remaining, setRemaining] = useState(0);
+  const [playNonce, setPlayNonce] = useState(0);
   const [source, setSource] = useState<SourceTarget | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const durRef = useRef(0);
@@ -52,6 +62,10 @@ export default function ListenView() {
       .catch((e) => setError(String(e)));
   }, [searchParams]);
 
+  useEffect(() => {
+    setMarked(readMarked());
+  }, []);
+
   // 队列位置持久化：刷新/离开后回来可恢复
   useEffect(() => {
     if (!queue || queue.items.length === 0) return;
@@ -78,8 +92,18 @@ export default function ListenView() {
             <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
               自定义范围学习
             </button>
+            <button className="btn" onClick={() => setMarksOpen(true)}>
+              已标记（{marked.length}）
+            </button>
           </div>
         </div>
+        {marksOpen && (
+          <div className="source-modal" onClick={() => setMarksOpen(false)}>
+            <div className="source-panel" onClick={(e) => e.stopPropagation()}>
+              {marksPanel()}
+            </div>
+          </div>
+        )}
         <CustomRangePicker
           open={pickerOpen}
           onClose={() => setPickerOpen(false)}
@@ -98,10 +122,41 @@ export default function ListenView() {
           <h2>{queue.custom ? "自定义范围已学完" : "本轮听学完成"}</h2>
           <p className="muted">共听了 {items.length} 段 · 剩余可听 {queue.remaining}</p>
           {queue.custom ? (
-            <div className="row">
-              <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
-                重新选择范围
-              </button>
+            <div>
+              <div className="row">
+                <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>
+                  重新选择范围
+                </button>
+              </div>
+              {customRange && remaining > 0 ? (
+                <div className="continue-box">
+                  <p className="muted">剩余未听 {remaining} 段，选择下一组或部分：</p>
+                  <div className="row">
+                    <button className="btn" disabled={loadingMore}
+                      onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: 20 })}>
+                      下一组 20
+                    </button>
+                    <button className="btn" disabled={loadingMore}
+                      onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: 50 })}>
+                      下一组 50
+                    </button>
+                  </div>
+                  <div className="continue-custom">
+                    <input
+                      type="number" min={1} max={50} placeholder="自定义数量"
+                      value={moreCount}
+                      onChange={(e) => setMoreCount(e.target.value)}
+                    />
+                    <button className="btn btn-primary" disabled={loadingMore || !moreCount}
+                      onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: Number(moreCount) })}>
+                      继续
+                    </button>
+                  </div>
+                  {notice && <p className="muted">{notice}</p>}
+                </div>
+              ) : (
+                <p className="muted">所选范围已全部听完，可重新选择范围。</p>
+              )}
             </div>
           ) : (
             <div className="continue-box">
@@ -135,20 +190,29 @@ export default function ListenView() {
     );
   }
 
-  async function applyCustom(range: CustomRange) {
+  async function applyCustom(range: CustomRange,
+                             opts?: { exclude?: string[]; limit?: number }) {
     setLoadingMore(true);
     setNotice("");
     try {
       const r = await postJson<ListenPayload>("/api/listen/custom", {
         subjects: range.subjects, points: range.points,
+        limit: opts?.limit ?? 100,
+        exclude: opts?.exclude ?? [],
       });
       if (!r.items.length) {
-        setNotice("所选范围暂无听学内容（可能尚未合成音频）。");
+        if (opts?.exclude?.length) setRemaining(0);
+        setNotice(opts?.exclude?.length
+          ? "剩余已全部听完。"
+          : "所选范围暂无听学内容（可能尚未合成音频）。");
         setPickerOpen(false);
         return;
       }
       setQueue(r);
       setHeardTotal(r.heard_total ?? heardTotal);
+      setSeenIds(new Set([...(opts?.exclude ?? []), ...r.items.map((i) => i.id)]));
+      setRemaining(Math.max(0, (r.remaining ?? 0) - r.items.length));
+      setCustomRange(range);
       setDeep(false);
       setIdx(0);
       setPlaying(false);
@@ -199,6 +263,89 @@ export default function ListenView() {
     else { setIdx(items.length); setPlaying(false); }
   }
 
+  const isMarked = marked.some((m) => m.id === entry.id);
+
+  function toggleMark() {
+    setMarked((prev) => {
+      const next = toggleMarkedItem(prev, entry);
+      writeMarked(next);
+      return next;
+    });
+  }
+
+  async function replayMarked(m: MarkedItem) {
+    setNotice("");
+    if (!queue) return;
+    const inQueueIdx = queue.items.findIndex((i) => i.id === m.id);
+    if (inQueueIdx >= 0) {
+      setIdx(inQueueIdx);
+    } else {
+      try {
+        const e = await getJson<Entry>(`/api/entries/${encodeURIComponent(m.id)}`);
+        setQueue((q) => q ? { ...q, items: [e, ...q.items.filter((i) => i.id !== e.id)] } : q);
+        setIdx(0);
+      } catch {
+        setNotice("重背失败：条目不存在或已下架。");
+        return;
+      }
+    }
+    setPlayNonce((n) => n + 1);
+    setMarksOpen(false);
+  }
+
+  function viewMarked(m: MarkedItem) {
+    window.location.href = `/study?view=read&entry=${encodeURIComponent(m.id)}`;
+  }
+
+  function removeMark(m: MarkedItem) {
+    setMarked((prev) => {
+      const next = prev.filter((x) => x.id !== m.id);
+      writeMarked(next);
+      return next;
+    });
+  }
+
+  function marksPanel() {
+    return (
+      <>
+        <div className="ai-chat-head">
+          <b>已标记条目（{marked.length}）</b>
+          <button onClick={() => setMarksOpen(false)}>×</button>
+        </div>
+        <div className="source-body">
+          {marked.length === 0 ? (
+            <p className="muted">暂无标记。听学时点「标记」收藏想重背的条目。</p>
+          ) : (
+            <div className="history-list">
+              {marked.map((m) => (
+                <div key={m.id} className="card history-card">
+                  <div className="history-head">
+                    <span className="tag">{m.subject}</span>
+                    <button className="badge-btn" onClick={() => removeMark(m)}>
+                      取消标记
+                    </button>
+                  </div>
+                  <p className="history-stem">{m.point}</p>
+                  <div className="row">
+                    <button className="btn" onClick={() => void replayMarked(m)}>重背</button>
+                    <button className="btn btn-primary" onClick={() => viewMarked(m)}>查看</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {marked.length > 0 && (
+          <div className="pick-footer">
+            <button className="btn" onClick={() => { setMarked([]); writeMarked([]); }}>
+              清空标记
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="page-box">
       <div className="mode-row">
@@ -210,12 +357,16 @@ export default function ListenView() {
             重新选择
           </button>
         )}
+        <button className="btn btn-ghost mode-btn" onClick={() => setMarksOpen(true)}>
+          已标记（{marked.length}）
+        </button>
       </div>
       {notice && <p className="muted">{notice}</p>}
       {deep && idx === 0 && <p className="muted">已定位到目标条目，可先听该条，其余按队列继续。</p>}
       <div className="card center">
         <h2>
           {entry.subject} · {entry.point}
+          {isMarked && <span className="badge">已标记</span>}
           {entry.listen_count ? <span className="badge">已听 {entry.listen_count} 次</span> : ""}
         </h2>
         <p className="muted">第 {idx + 1} 段 / 队列 {items.length}</p>
@@ -227,6 +378,7 @@ export default function ListenView() {
           ref={audioRef}
           controls
           autoPlay
+          key={`${entry.id}-${playNonce}`}
           src={`/api/audio/${entry.id}`}
           onLoadedMetadata={(e) => { durRef.current = Math.round(e.currentTarget.duration || 0); }}
           onPlay={() => setPlaying(true)}
@@ -242,6 +394,9 @@ export default function ListenView() {
         />
         <div className="row">
           <button className="btn btn-ghost" disabled={idx === 0} onClick={() => setIdx(idx - 1)}>上一个</button>
+          <button className="btn btn-ghost" onClick={toggleMark}>
+            {isMarked ? "已标记 ✓" : "标记"}
+          </button>
           <button className="btn btn-ghost" onClick={() => { markExposed(); next(); }}>
             {playing ? "跳过" : "下一段"}
           </button>
@@ -261,6 +416,13 @@ export default function ListenView() {
         )}
       </div>
       <SourceViewer source={source} onClose={() => setSource(null)} />
+      {marksOpen && (
+        <div className="source-modal" onClick={() => setMarksOpen(false)}>
+          <div className="source-panel" onClick={(e) => e.stopPropagation()}>
+            {marksPanel()}
+          </div>
+        </div>
+      )}
       <CustomRangePicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
