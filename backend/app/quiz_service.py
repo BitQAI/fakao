@@ -106,27 +106,44 @@ def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict
         entry = _entry_by_id(conn, entry_id)
         if entry is None:
             continue
-        cached = conn.execute(
-            "SELECT id, qtype, stem, options, answer, analysis FROM quizzes "
-            "WHERE entry_id=? AND date(created_at)=?", (entry_id, day)
-        ).fetchone()
-        if cached:
-            quiz = {"id": cached["id"], "entry_id": entry_id,
-                    "qtype": cached["qtype"], "stem": cached["stem"],
-                    "options": json.loads(cached["options"] or "[]"),
-                    "answer": cached["answer"], "analysis": cached["analysis"] or ""}
-            quiz["analysis"] = ensure_quiz_analysis(conn, quiz)
-        else:
-            quiz = ai.generate_quiz(entry) or ai.cloze_quiz(entry)
-            cur = conn.execute(
-                "INSERT INTO quizzes (entry_id, qtype, stem, options, answer, analysis, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (entry_id, quiz["qtype"], quiz["stem"],
-                 json.dumps(quiz["options"], ensure_ascii=False),
-                 quiz["answer"], quiz.get("analysis", ""),
-                 datetime.now().isoformat(timespec="seconds")),
-            )
-            quiz = {**quiz, "id": cur.lastrowid, "entry_id": entry_id}
-        out.append(quiz)
+        out.append(_quiz_for_entry(conn, entry, day))
     conn.commit()
     return out
+
+
+def _quiz_for_entry(conn, entry: dict, day: str) -> dict:
+    """取/建当日题目：当日已有缓存直接复用，避免重复耗 LLM。"""
+    entry_id = entry["id"]
+    cached = conn.execute(
+        "SELECT id, qtype, stem, options, answer, analysis FROM quizzes "
+        "WHERE entry_id=? AND date(created_at)=?", (entry_id, day)
+    ).fetchone()
+    if cached:
+        quiz = {"id": cached["id"], "entry_id": entry_id,
+                "qtype": cached["qtype"], "stem": cached["stem"],
+                "options": json.loads(cached["options"] or "[]"),
+                "answer": cached["answer"], "analysis": cached["analysis"] or ""}
+        quiz["analysis"] = ensure_quiz_analysis(conn, quiz)
+        return quiz
+    quiz = ai.generate_quiz(entry) or ai.cloze_quiz(entry)
+    cur = conn.execute(
+        "INSERT INTO quizzes (entry_id, qtype, stem, options, answer, analysis, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (entry_id, quiz["qtype"], quiz["stem"],
+         json.dumps(quiz["options"], ensure_ascii=False),
+         quiz["answer"], quiz.get("analysis", ""),
+         datetime.now().isoformat(timespec="seconds")),
+    )
+    return {**quiz, "id": cur.lastrowid, "entry_id": entry_id}
+
+
+def custom_quiz(conn, subjects: list[str], points: list[str],
+                limit: int = 10, timed: bool = False) -> dict:
+    """智能组卷：按科目/知识点过滤（复用自定义范围排序），题目走当日缓存。"""
+    from app.service import custom_entries
+
+    day = date.today().isoformat()
+    entries = custom_entries(conn, subjects, points, limit=limit)
+    questions = [_quiz_for_entry(conn, e, day) for e in entries[:limit]]
+    conn.commit()
+    return {"questions": questions, "timed": timed, "total": len(questions)}

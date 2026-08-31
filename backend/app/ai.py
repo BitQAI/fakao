@@ -137,14 +137,11 @@ def generate_quiz(entry: dict) -> dict | None:
             return None
         answer = data["answer"].strip().upper()
         letters = sorted(set(answer))
-        qtype = data.get("qtype")
-        if qtype not in {"choice", "multi"}:
-            qtype = "multi" if len(letters) > 1 else "choice"
         if not all(0 <= ord(ch) - 65 < len(data["options"]) for ch in letters):
             return None
-        if qtype == "multi" and len(letters) < 2:
-            qtype = "choice"
-        data["qtype"] = qtype
+        # 题库统一存 choice：前端按答案长度区分单选/多选，LLM 的 multi 归一化，
+        # 避免违反 quizzes.qtype CHECK('choice','cloze')。
+        data["qtype"] = "choice"
         data["answer"] = "".join(letters)
         data["analysis"] = (data.get("analysis") or "").strip() \
             or f"正确答案：{''.join(letters)}。"

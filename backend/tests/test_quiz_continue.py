@@ -291,3 +291,21 @@ def test_custom_listen_remaining_excludes(tmp_path, monkeypatch):
     assert data["custom"] is True
     assert [it["id"] for it in data["items"]] == ["XF-001"]
     assert data["remaining"] == 1
+
+
+def test_custom_quiz_filters_and_reuses_cache(tmp_path, monkeypatch):
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    r = client.post("/api/quiz/custom",
+                    json={"subjects": ["刑法"], "limit": 5, "timed": True})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["timed"] is True
+    assert data["total"] == 1
+    assert data["questions"][0]["qtype"] == "cloze"  # LLM 兜底
+    qid = data["questions"][0]["id"]
+    # 同日缓存复用：再次组卷返回同一题
+    r2 = client.post("/api/quiz/custom", json={"subjects": ["刑法"], "limit": 5})
+    assert r2.json()["questions"][0]["id"] == qid
+    # 科目过滤：不存在的科目为空
+    r3 = client.post("/api/quiz/custom", json={"subjects": ["三国法"], "limit": 5})
+    assert r3.json()["questions"] == []

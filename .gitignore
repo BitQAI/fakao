@@ -11,6 +11,7 @@ node_modules/
 .next/
 out/
 *.tsbuildinfo
+frontend/e2e/shots/
 
 # 后端
 __pycache__/

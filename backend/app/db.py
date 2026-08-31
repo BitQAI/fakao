@@ -93,6 +93,13 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS marks (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_id   TEXT NOT NULL REFERENCES entries(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_marks_entry ON marks(entry_id, created_at);
 """
 
 

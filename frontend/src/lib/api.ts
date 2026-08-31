@@ -19,3 +19,4 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const postJson = <T>(path: string, body?: unknown) => send<T>("POST", path, body);
 export const putJson = <T>(path: string, body?: unknown) => send<T>("PUT", path, body);
+export const delJson = <T>(path: string, body?: unknown) => send<T>("DELETE", path, body);

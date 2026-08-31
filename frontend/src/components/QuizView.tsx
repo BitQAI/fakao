@@ -2,12 +2,13 @@
 import { useEffect, useState } from "react";
 import { getJson, postJson } from "@/lib/api";
 import { mdToHtml } from "@/lib/md";
+import GroupQuizView from "./GroupQuizView";
 import type { QuizHistoryItem, QuizQuestion } from "@/lib/types";
 
 interface AnswerResult { correct: boolean; answer: string; analysis?: string; }
 
 export default function QuizView() {
-  const [view, setView] = useState<"today" | "history">("today");
+  const [view, setView] = useState<"today" | "group" | "history">("today");
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
   const [history, setHistory] = useState<QuizHistoryItem[] | null>(null);
   const [idx, setIdx] = useState(0);
@@ -33,6 +34,15 @@ export default function QuizView() {
   }, [view, history]);
 
   if (error) return <p className="muted">加载失败：{error}</p>;
+
+  if (view === "group") {
+    return (
+      <div>
+        <QuizSegments view={view} setView={setView} />
+        <GroupQuizView />
+      </div>
+    );
+  }
 
   if (view === "history") {
     return (
@@ -209,13 +219,15 @@ export default function QuizView() {
 function QuizSegments({
   view, setView,
 }: {
-  view: "today" | "history";
-  setView: (v: "today" | "history") => void;
+  view: "today" | "group" | "history";
+  setView: (v: "today" | "group" | "history") => void;
 }) {
   return (
     <div className="segments quiz-segments">
       <button className={`segment${view === "today" ? " active" : ""}`}
         onClick={() => setView("today")}>今日</button>
+      <button className={`segment${view === "group" ? " active" : ""}`}
+        onClick={() => setView("group")}>组卷</button>
       <button className={`segment${view === "history" ? " active" : ""}`}
         onClick={() => setView("history")}>历史</button>
     </div>

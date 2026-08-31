@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getJson } from "@/lib/api";
 import type { CoverageTree } from "@/lib/types";
 
@@ -54,6 +55,9 @@ export default function CustomRangePicker({
   const [points, setPoints] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;
@@ -67,8 +71,9 @@ export default function CustomRangePicker({
   }, [open]);
 
   if (!open) return null;
+  if (!mounted) return null;
   if (!tree) {
-    return (
+    return createPortal((
       <div className="source-modal" onClick={onClose}>
         <div className="source-panel" onClick={(e) => e.stopPropagation()}>
           <div className="ai-chat-head">
@@ -80,7 +85,7 @@ export default function CustomRangePicker({
           </div>
         </div>
       </div>
-    );
+    ), document.body);
   }
 
   const subjectNames = Object.keys(tree);
@@ -143,7 +148,7 @@ export default function CustomRangePicker({
       : { subjects: [], points: Array.from(points) });
   }
 
-  return (
+  return createPortal((
     <div className="source-modal" onClick={onClose}>
       <div className="source-panel" onClick={(e) => e.stopPropagation()}>
         <div className="ai-chat-head">
@@ -262,5 +267,5 @@ export default function CustomRangePicker({
         )}
       </div>
     </div>
-  );
+  ), document.body);
 }

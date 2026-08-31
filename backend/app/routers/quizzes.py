@@ -1,7 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import db, quiz_service
 
@@ -20,6 +20,13 @@ class QuizAnswerIn(BaseModel):
     duration_sec: int = 0
 
 
+class QuizCustomIn(BaseModel):
+    subjects: list[str] = []
+    points: list[str] = []
+    limit: int = Field(default=10, ge=1, le=50)
+    timed: bool = False
+
+
 @router.get("/quiz/today")
 def get_quiz(conn=Depends(db.get_db)):
     return {"questions": quiz_service.build_daily_quiz(conn, date.today().isoformat())}
@@ -28,6 +35,12 @@ def get_quiz(conn=Depends(db.get_db)):
 @router.get("/quiz/history")
 def get_quiz_history(limit: int = 50, conn=Depends(db.get_db)):
     return {"items": quiz_service.quiz_history(conn, min(max(limit, 1), 200))}
+
+
+@router.post("/quiz/custom")
+def custom_quiz(payload: QuizCustomIn, conn=Depends(db.get_db)):
+    return quiz_service.custom_quiz(conn, payload.subjects, payload.points,
+                                    payload.limit, payload.timed)
 
 
 @router.post("/quiz/answer")

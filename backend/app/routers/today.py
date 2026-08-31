@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends
 
-from app import db, service
+from app import db, service, stats
 
 router = APIRouter(prefix="/api", tags=["today"])
 
@@ -14,6 +14,7 @@ def get_today(conn=Depends(db.get_db)):
         "date": day,
         "days_left": service.days_left(conn, day),
         "plan": service.ensure_today_plan(conn, day),
-        "stats": service.today_stats(conn, day),
+        "stats": stats.today_stats(conn, day),
+        "streak": stats.streak_info(conn, day),
         "morning_report": service.morning_report(conn, day),
     }

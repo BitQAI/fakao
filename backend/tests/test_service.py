@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from app import ai, quiz_service
+from app import ai, quiz_service, stats
 from app import db, importer, service
 
 
@@ -57,7 +57,7 @@ def test_record_review_and_coverage(tmp_db):
     seed(conn)
     service.record_review(conn, "XF-001", "read", "bad")
     service.record_review(conn, "XF-001", "read", "good")
-    tree = service.coverage_payload(conn)
+    tree = stats.coverage_payload(conn)
     point_state = tree["刑法"]["submodules"]["分则-财产犯罪"]["points"]["考点1"]
     # 两次复习且末次 good → coverage.entry_state 返回 mastered（与 coverage spec 一致）
     assert point_state == "mastered"
@@ -82,9 +82,49 @@ def test_quiz_answer_records(tmp_db):
     service.ensure_today_plan(conn, today)
     questions = quiz_service.build_daily_quiz(conn, today)
     quiz_service.record_quiz_answer(conn, questions[0]["id"], "随便答", False)
-    stats = service.today_stats(conn, today)
-    assert stats["quiz_total"] == 1 and stats["quiz_correct"] == 0
-    assert stats["days_left"] == (date(2026, 9, 13) - date.today()).days
+    st = stats.today_stats(conn, today)
+    assert st["quiz_total"] == 1 and st["quiz_correct"] == 0
+    assert st["days_left"] == (date(2026, 9, 13) - date.today()).days
+
+
+def test_today_stats_done_includes_quiz_and_caps_percent(tmp_db):
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn)
+    today = date.today().isoformat()
+    service.ensure_today_plan(conn, today)
+    questions = quiz_service.build_daily_quiz(conn, today)
+    quiz_service.record_quiz_answer(conn, questions[0]["id"], "随便答", False)
+    service.record_review(conn, "XF-001", "read", "good")
+    st = stats.today_stats(conn, today)
+    # 完成率 = 看背 + 自测（quota=5：1 看 + 1 测）
+    assert st["done"] == 2
+    assert st["percent"] == 40
+    assert st["over_done"] is False
+    for i in range(2, 6):
+        service.record_review(conn, f"XF-{i:03d}", "read", "good")
+    st = stats.today_stats(conn, today)
+    assert st["done"] == 6
+    assert st["percent"] == 100  # 封顶
+    assert st["over_done"] is True
+
+
+def test_coverage_quiz_wrong_is_weak(tmp_db):
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn)
+    today = date.today().isoformat()
+    service.ensure_today_plan(conn, today)
+    questions = quiz_service.build_daily_quiz(conn, today)
+    quiz_service.record_quiz_answer(conn, questions[0]["id"], "错答", False)
+    tree = stats.coverage_payload(conn)
+    first_point = tree["刑法"]["submodules"]["分则-财产犯罪"]["points"]["考点1"]
+    assert first_point == "weak"
+    # 纯听学（exposed）视为已学而非未学
+    service.record_review(conn, "XF-002", "listen", "exposed", 30)
+    tree = stats.coverage_payload(conn)
+    second_point = tree["刑法"]["submodules"]["分则-财产犯罪"]["points"]["考点2"]
+    assert second_point == "learned"
 
 
 def test_settings_and_days_left(tmp_db):

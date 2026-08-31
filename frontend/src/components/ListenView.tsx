@@ -1,13 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { getJson, postJson } from "@/lib/api";
+import { delJson, getJson, postJson } from "@/lib/api";
 import {
   readSavedQueue, writeSavedQueue,
-  readMarked, writeMarked, toggleMarkedItem,
-  type MarkedItem,
+  readMarked, writeMarked,
 } from "@/lib/progressStore";
-import type { Entry, ListenPayload } from "@/lib/types";
+import type { Entry, ListenPayload, MarkItem } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 
@@ -26,7 +25,7 @@ export default function ListenView() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [marksOpen, setMarksOpen] = useState(false);
-  const [marked, setMarked] = useState<MarkedItem[]>([]);
+  const [marked, setMarked] = useState<MarkItem[]>([]);
   const [customRange, setCustomRange] = useState<CustomRange | null>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
   const [remaining, setRemaining] = useState(0);
@@ -63,7 +62,23 @@ export default function ListenView() {
   }, [searchParams]);
 
   useEffect(() => {
-    setMarked(readMarked());
+    getJson<{ items: MarkItem[] }>("/api/marks")
+      .then(async (d) => {
+        setMarked(d.items);
+        // 迁移旧 localStorage 标记（单用户设备级 → 服务端，逐条容错）
+        const legacy = readMarked();
+        const existing = new Set(d.items.map((m) => m.entry_id));
+        const pending = legacy.filter((m) => !existing.has(m.id));
+        if (pending.length) {
+          for (const m of pending) {
+            try { await postJson("/api/marks", { entry_id: m.id }); } catch { /* 保留本地 */ }
+          }
+          writeMarked([]);
+          const fresh = await getJson<{ items: MarkItem[] }>("/api/marks");
+          setMarked(fresh.items);
+        }
+      })
+      .catch(() => { /* 服务端不可用时保持空标记 */ });
   }, []);
 
   // 队列位置持久化：刷新/离开后回来可恢复
@@ -249,7 +264,7 @@ export default function ListenView() {
   }
 
   function markExposed() {
-    if (exposedRef.current) return;
+    if (exposedRef.current || durRef.current < 10) return;  // 不足 10s 不视为已听
     exposedRef.current = true;
     if (!entry.listen_count) setHeardTotal((n) => n + 1);
     void postJson("/api/reviews", {
@@ -263,25 +278,38 @@ export default function ListenView() {
     else { setIdx(items.length); setPlaying(false); }
   }
 
-  const isMarked = marked.some((m) => m.id === entry.id);
+  const isMarked = marked.some((m) => m.entry_id === entry.id);
 
-  function toggleMark() {
-    setMarked((prev) => {
-      const next = toggleMarkedItem(prev, entry);
-      writeMarked(next);
-      return next;
-    });
+  async function toggleMark() {
+    if (isMarked) {
+      const m = marked.find((x) => x.entry_id === entry.id);
+      if (!m) return;
+      try {
+        await delJson(`/api/marks/${m.id}`);
+        setMarked((prev) => prev.filter((x) => x.id !== m.id));
+      } catch (e) {
+        setNotice("取消失败：" + String(e));
+      }
+    } else {
+      try {
+        await postJson("/api/marks", { entry_id: entry.id });
+        const fresh = await getJson<{ items: MarkItem[] }>("/api/marks");
+        setMarked(fresh.items);
+      } catch (e) {
+        setNotice("标记失败：" + String(e));
+      }
+    }
   }
 
-  async function replayMarked(m: MarkedItem) {
+  async function replayMarked(m: MarkItem) {
     setNotice("");
     if (!queue) return;
-    const inQueueIdx = queue.items.findIndex((i) => i.id === m.id);
+    const inQueueIdx = queue.items.findIndex((i) => i.id === m.entry_id);
     if (inQueueIdx >= 0) {
       setIdx(inQueueIdx);
     } else {
       try {
-        const e = await getJson<Entry>(`/api/entries/${encodeURIComponent(m.id)}`);
+        const e = await getJson<Entry>(`/api/entries/${encodeURIComponent(m.entry_id)}`);
         setQueue((q) => q ? { ...q, items: [e, ...q.items.filter((i) => i.id !== e.id)] } : q);
         setIdx(0);
       } catch {
@@ -293,16 +321,26 @@ export default function ListenView() {
     setMarksOpen(false);
   }
 
-  function viewMarked(m: MarkedItem) {
-    window.location.href = `/study?view=read&entry=${encodeURIComponent(m.id)}`;
+  function viewMarked(m: MarkItem) {
+    window.location.href = `/study?view=read&entry=${encodeURIComponent(m.entry_id)}`;
   }
 
-  function removeMark(m: MarkedItem) {
-    setMarked((prev) => {
-      const next = prev.filter((x) => x.id !== m.id);
-      writeMarked(next);
-      return next;
-    });
+  async function removeMark(m: MarkItem) {
+    try {
+      await delJson(`/api/marks/${m.id}`);
+      setMarked((prev) => prev.filter((x) => x.id !== m.id));
+    } catch (e) {
+      setNotice("取消失败：" + String(e));
+    }
+  }
+
+  async function clearMarks() {
+    try {
+      await delJson("/api/marks");
+      setMarked([]);
+    } catch (e) {
+      setNotice("清空失败：" + String(e));
+    }
   }
 
   function marksPanel() {
@@ -320,12 +358,12 @@ export default function ListenView() {
               {marked.map((m) => (
                 <div key={m.id} className="card history-card">
                   <div className="history-head">
-                    <span className="tag">{m.subject}</span>
-                    <button className="badge-btn" onClick={() => removeMark(m)}>
+                    <span className="tag">{m.entry.subject}</span>
+                    <button className="badge-btn" onClick={() => void removeMark(m)}>
                       取消标记
                     </button>
                   </div>
-                  <p className="history-stem">{m.point}</p>
+                  <p className="history-stem">{m.entry.point}</p>
                   <div className="row">
                     <button className="btn" onClick={() => void replayMarked(m)}>重背</button>
                     <button className="btn btn-primary" onClick={() => viewMarked(m)}>查看</button>
@@ -337,7 +375,7 @@ export default function ListenView() {
         </div>
         {marked.length > 0 && (
           <div className="pick-footer">
-            <button className="btn" onClick={() => { setMarked([]); writeMarked([]); }}>
+            <button className="btn" onClick={() => void clearMarks()}>
               清空标记
             </button>
           </div>
@@ -384,7 +422,7 @@ export default function ListenView() {
           onPlay={() => setPlaying(true)}
           onPause={() => {
             setPlaying(false);
-            if (durRef.current >= 15) markExposed();  // 听了 15 秒以上也算暴露
+            markExposed();  // 暂停/播完且 ≥10s 才算暴露
           }}
           onEnded={() => {
             markExposed();
@@ -397,7 +435,7 @@ export default function ListenView() {
           <button className="btn btn-ghost" onClick={toggleMark}>
             {isMarked ? "已标记 ✓" : "标记"}
           </button>
-          <button className="btn btn-ghost" onClick={() => { markExposed(); next(); }}>
+          <button className="btn btn-ghost" onClick={() => next()}>
             {playing ? "跳过" : "下一段"}
           </button>
         </div>

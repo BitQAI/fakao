@@ -5,6 +5,7 @@ import { mdToHtml } from "@/lib/md";
 import CoverageTree from "@/components/CoverageTree";
 import HistoryView from "@/components/HistoryView";
 import LeaderboardView from "@/components/LeaderboardView";
+import StatsView from "@/components/StatsView";
 import type { CoverageTree as Tree, Report, Stats, TodayPayload } from "@/lib/types";
 
 export default function ReportPage() {
@@ -35,6 +36,7 @@ export default function ReportPage() {
         <button className={`segment${view === "coverage" ? " active" : ""}`} onClick={() => setView("coverage")}>覆盖</button>
         <button className={`segment${view === "history" ? " active" : ""}`} onClick={() => setView("history")}>历史</button>
         <button className={`segment${view === "leaderboard" ? " active" : ""}`} onClick={() => setView("leaderboard")}>排行</button>
+        <button className={`segment${view === "stats" ? " active" : ""}`} onClick={() => setView("stats")}>统计</button>
       </div>
 
       {view === "review" && (
@@ -43,7 +45,7 @@ export default function ReportPage() {
             <h2 className="card-title">今日数据</h2>
             {stats ? (
               <p className="muted">
-                完成 {stats.done}/{stats.quota}（{stats.percent}%）· 自测 {stats.quiz_correct}/{stats.quiz_total} · 听学 {stats.listen_min} 分钟 · 薄弱：{stats.weak}
+                看背+自测 {stats.done}/{stats.quota}（{stats.percent}%{stats.over_done ? "·超额" : ""}）· 听学 {stats.listen_min} 分钟 · 薄弱：{stats.weak}
               </p>
             ) : <p className="muted">暂无数据</p>}
           </section>
@@ -72,6 +74,8 @@ export default function ReportPage() {
       {view === "history" && <HistoryView />}
 
       {view === "leaderboard" && <LeaderboardView />}
+
+      {view === "stats" && <StatsView />}
     </div>
   );
 }

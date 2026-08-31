@@ -114,6 +114,49 @@ def test_import_rejects_bad_json(client):
     assert r.status_code == 400
 
 
+def test_import_promotes_to_final(client):
+    import json
+    payload = {
+        "schema": "fakao-entry/1.0", "generated_at": "x", "count": 1,
+        "entries": [{
+            "id": "XF-999", "subject": "刑法", "submodule": "分则",
+            "point": "Web导入考点", "anchor": "甲实施抢劫行为，使用暴力压制反抗后取得财物，案件事实完整描述",
+            "conclusion": "成立罪名。", "priority": "高频考点", "rationale": "高频",
+            "sources": [{"type": "高频", "ref": "刑法-高频考点.md", "loc": "抢劫罪"}],
+            "statutes": [], "note": None, "tts_text": "结论。",
+        }],
+    }
+    r = client.post("/api/import",
+                    files={"file": ("web.json", json.dumps(payload, ensure_ascii=False).encode(), "application/json")})
+    assert r.status_code == 200
+    # entry_by_id 仅返回 final：能被查到时即证明已 promote
+    assert client.get("/api/entries/XF-999").status_code == 200
+
+
+def test_marks_crud(client):
+    r = client.post("/api/marks", json={"entry_id": "XF-001"})
+    assert r.status_code == 200
+    mark_id = r.json()["id"]
+    # 幂等：重复添加返回同一 id
+    assert client.post("/api/marks", json={"entry_id": "XF-001"}).json()["id"] == mark_id
+    items = client.get("/api/marks").json()["items"]
+    assert len(items) == 1
+    assert items[0]["entry"]["point"] == "转化型抢劫"
+    assert client.delete(f"/api/marks/{mark_id}").status_code == 200
+    assert client.get("/api/marks").json()["items"] == []
+    assert client.delete(f"/api/marks/{mark_id}").status_code == 404
+
+
+def test_marks_missing_entry_404(client):
+    assert client.post("/api/marks", json={"entry_id": "NOPE-001"}).status_code == 404
+
+
+def test_marks_clear(client):
+    client.post("/api/marks", json={"entry_id": "XF-001"})
+    assert client.delete("/api/marks").status_code == 200
+    assert client.get("/api/marks").json()["items"] == []
+
+
 def test_assistant_streams_fallback(client):
     r = client.post("/api/assistant/ask", json={"question": "转化型抢劫是什么"})
     assert r.status_code == 200
