@@ -245,3 +245,49 @@ def test_custom_listen_filters_audio(tmp_path, monkeypatch):
     data = client.post("/api/listen/custom", json={"subjects": ["刑法"]}).json()
     assert data["custom"] is True
     assert [it["id"] for it in data["items"]] == ["XF-001", "XF-002"]
+
+
+def test_custom_plan_excludes(tmp_path, monkeypatch):
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final",
+        "generated_at": "x", "count": 1, "entries": [_entry2()],
+    })
+    conn.commit()
+    conn.close()
+    data = client.post("/api/plans/custom",
+                       json={"subjects": ["刑法"], "exclude": ["XF-001"]}).json()
+    assert [it["id"] for it in data["items"]] == ["XF-002"]
+    assert data["total"] == 1
+
+
+def test_custom_plan_total(tmp_path, monkeypatch):
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final",
+        "generated_at": "x", "count": 1, "entries": [_entry2()],
+    })
+    conn.commit()
+    conn.close()
+    data = client.post("/api/plans/custom",
+                       json={"subjects": ["刑法"], "limit": 1}).json()
+    assert len(data["items"]) == 1
+    assert data["total"] == 2
+
+
+def test_custom_listen_remaining_excludes(tmp_path, monkeypatch):
+    client, db_path = _make_client(tmp_path, monkeypatch)
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final",
+        "generated_at": "x", "count": 1, "entries": [_entry2()],
+    })
+    conn.commit()
+    conn.close()
+    data = client.post("/api/listen/custom",
+                       json={"subjects": ["刑法"], "exclude": ["XF-002"]}).json()
+    assert data["custom"] is True
+    assert [it["id"] for it in data["items"]] == ["XF-001"]
+    assert data["remaining"] == 1

@@ -21,6 +21,7 @@ class CustomRangeIn(BaseModel):
     subjects: list[str] = []
     points: list[str] = []
     limit: int = Field(default=200, ge=1, le=500)
+    exclude: list[str] = []
 
 
 @router.get("/entries/{entry_id}")
@@ -63,14 +64,17 @@ def listen_more(payload: ListenMoreIn, conn=Depends(db.get_db)):
 
 @router.post("/plans/custom")
 def custom_plan(payload: CustomRangeIn, conn=Depends(db.get_db)):
-    return {"items": service.custom_entries(
-        conn, payload.subjects, payload.points, payload.limit)}
+    items = service.custom_entries(
+        conn, payload.subjects, payload.points,
+        listen_only=False, exclude=payload.exclude)
+    return {"items": items[:payload.limit], "total": len(items)}
 
 
 @router.post("/listen/custom")
 def custom_listen(payload: CustomRangeIn, conn=Depends(db.get_db)):
     items = service.custom_entries(
-        conn, payload.subjects, payload.points, min(payload.limit, 100),
-        listen_only=True)
-    return {"items": items, "remaining": len(items),
+        conn, payload.subjects, payload.points,
+        listen_only=True, exclude=payload.exclude)
+    limit = min(payload.limit, 100)
+    return {"items": items[:limit], "remaining": len(items),
             "generating": False, "custom": True}

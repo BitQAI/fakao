@@ -37,6 +37,12 @@ body {
   background: #eef2ff; color: var(--primary);
 }
 .badge-red { background: #fef2f2; color: var(--bad); }
+.badge-btn {
+  font-size: 12px; padding: 4px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  cursor: pointer;
+}
+.badge-btn:active { background: #f9fafb; }
 .counts { display: flex; gap: 8px; margin: 8px 0; }
 .count {
   flex: 1; background: #f9fafb; border: 1px solid var(--line);
@@ -145,6 +151,13 @@ body {
   border-bottom: 1px solid var(--line); font-size: 15px;
 }
 .pick-item-name { flex: 1; }
+.pick-point-name { flex: 1; min-width: 0; }
+.pick-state {
+  flex: none; font-size: 11px; line-height: 1; padding: 3px 7px;
+  border-radius: 999px; background: #f3f4f6; color: var(--muted);
+}
+.pick-state.st-weak { background: #fef2f2; color: var(--bad); }
+.pick-state.st-learned, .pick-state.st-mastered { background: #f0fdf4; color: var(--good); }
 .pick-tree { display: flex; flex-direction: column; padding: 4px 0 8px; }
 .pick-row { display: flex; align-items: center; gap: 8px; }
 .pick-subject-row { font-weight: 600; padding: 8px 0; }

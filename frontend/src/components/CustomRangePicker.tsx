@@ -30,6 +30,17 @@ function TriCheck({
   );
 }
 
+function stateCounts(states: Record<string, number>, total: number) {
+  const unlearned = states.new ?? 0;
+  return { learned: Math.max(0, total - unlearned), unlearned };
+}
+
+function stateLabel(st: string) {
+  if (st === "new") return "未学";
+  if (st === "weak") return "薄弱";
+  return "已学";
+}
+
 export default function CustomRangePicker({
   open, onClose, onConfirm,
 }: {
@@ -153,17 +164,22 @@ export default function CustomRangePicker({
           )}
           {mode === "subject" && (
             <div className="pick-list">
-              {subjectNames.map((name) => (
-                <label key={name} className="pick-item">
-                  <input
-                    type="checkbox"
-                    checked={subjects.has(name)}
-                    onChange={() => toggleSubject(name)}
-                  />
-                  <span className="pick-item-name">{name}</span>
-                  <span className="muted">{tree[name].count} 条</span>
-                </label>
-              ))}
+              {subjectNames.map((name) => {
+                const sc = stateCounts(tree[name].states, tree[name].count);
+                return (
+                  <label key={name} className="pick-item">
+                    <input
+                      type="checkbox"
+                      checked={subjects.has(name)}
+                      onChange={() => toggleSubject(name)}
+                    />
+                    <span className="pick-item-name">{name}</span>
+                    <span className="muted">
+                      {tree[name].count} 条 · 已学 {sc.learned} · 未学 {sc.unlearned}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           )}
           {mode === "points" && (
@@ -172,6 +188,7 @@ export default function CustomRangePicker({
                 const sPoints = allPointsOf(subject);
                 const sChecked = sPoints.length > 0 && sPoints.every((p) => points.has(p));
                 const sInd = sPoints.some((p) => points.has(p)) && !sChecked;
+                const sCounts = stateCounts(tree[subject].states, tree[subject].count);
                 return (
                   <div key={subject} className="pick-group">
                     <div className="pick-row pick-subject-row">
@@ -182,7 +199,9 @@ export default function CustomRangePicker({
                       />
                       <button className="pick-toggle" onClick={() => toggleExpand(subject)}>
                         {expanded.has(subject) ? "▾" : "▸"} {subject}
-                        <span className="muted">（{tree[subject].count}）</span>
+                        <span className="muted">
+                          （{tree[subject].count} 条 · 已学 {sCounts.learned} · 未学 {sCounts.unlearned}）
+                        </span>
                       </button>
                     </div>
                     {expanded.has(subject) && (
@@ -190,6 +209,7 @@ export default function CustomRangePicker({
                         const pNames = pointsOf(subject, sub);
                         const subChecked = pNames.every((p) => points.has(p));
                         const subInd = pNames.some((p) => points.has(p)) && !subChecked;
+                        const subCounts = stateCounts(sd.states, sd.count);
                         return (
                           <div key={sub} className="pick-sub">
                             <div className="pick-row">
@@ -198,19 +218,25 @@ export default function CustomRangePicker({
                                 indeterminate={subInd}
                                 onChange={() => toggleSubAll(subject, sub)}
                               />
-                              <span className="pick-sub-name">{sub}（{sd.count}）</span>
+                              <span className="pick-sub-name">
+                                {sub}（{sd.count} · 已学 {subCounts.learned} · 未学 {subCounts.unlearned}）
+                              </span>
                             </div>
                             <div className="pick-points">
-                              {pNames.map((p) => (
-                                <label key={p} className="pick-point">
-                                  <input
-                                    type="checkbox"
-                                    checked={points.has(p)}
-                                    onChange={() => togglePoint(p)}
-                                  />
-                                  {p}
-                                </label>
-                              ))}
+                              {pNames.map((p) => {
+                                const st = sd.points[p];
+                                return (
+                                  <label key={p} className="pick-point">
+                                    <input
+                                      type="checkbox"
+                                      checked={points.has(p)}
+                                      onChange={() => togglePoint(p)}
+                                    />
+                                    <span className="pick-point-name">{p}</span>
+                                    <span className={`pick-state st-${st}`}>{stateLabel(st)}</span>
+                                  </label>
+                                );
+                              })}
                             </div>
                           </div>
                         );
