@@ -61,6 +61,8 @@ def entry_by_id(conn, entry_id: str) -> dict | None:
     e = _entry_dict(r)
     review_stats.attach_read_counts(conn, [e])
     review_stats.attach_listen_counts(conn, [e])
+    review_stats.attach_listened_today(conn, [e])
+    review_stats.attach_reviewed_today(conn, [e])
     return e
 
 
@@ -246,15 +248,9 @@ def custom_entries(conn, subjects: list[str] | None = None,
     # 批量附加 read_count / listen_count
     items = review_stats.attach_read_counts(conn, items)
     items = review_stats.attach_listen_counts(conn, items)
-    # 排序：未读/未听优先 → 次数少优先 → 优先级 → 科目顺序 → id
+    # 排序：未读/未听优先 → 次数少优先 → 久未听优先 → 优先级 → 科目顺序 → id
     if listen_only:
-        items.sort(key=lambda e: (
-            e.get("listen_count", 0),  # 未听(0)优先
-            scheduler.PRIORITY_ORDER.get(e["priority"], 9),
-            scheduler.SUBJECT_ORDER.index(e["subject"])
-            if e["subject"] in scheduler.SUBJECT_ORDER else len(scheduler.SUBJECT_ORDER),
-            e["id"],
-        ))
+        items = _sort_listen_items(items)
     else:
         items.sort(key=lambda e: (
             e.get("read_count", 0),    # 未读(0)优先
@@ -265,7 +261,9 @@ def custom_entries(conn, subjects: list[str] | None = None,
         ))
     if limit is not None:
         items = items[:limit]
-    return review_stats.attach_reviewed_today(conn, items)
+    items = review_stats.attach_reviewed_today(conn, items)
+    items = review_stats.attach_listened_today(conn, items)
+    return items
 
 
 def record_review(conn, entry_id: str, mode: str, result: str,
@@ -384,10 +382,29 @@ def record_chat(conn, question: str, answer: str,
     conn.commit()
 
 
+def _sort_listen_items(items: list[dict]) -> list[dict]:
+    """听学统一排序：未听优先 → 次数少优先 → 久未听优先 → 优先级 → 科目 → id。"""
+    never: list[tuple] = []
+    heard: list[tuple] = []
+    for e in items:
+        cnt = e.get("listen_count", 0) or 0
+        last = e.get("last_ts")
+        prio_rank = scheduler.PRIORITY_ORDER.get(e.get("priority"), 9)
+        subj = e.get("subject")
+        subj_rank = (scheduler.SUBJECT_ORDER.index(subj)
+                     if subj in scheduler.SUBJECT_ORDER
+                     else len(scheduler.SUBJECT_ORDER))
+        tup = (e, cnt, last or "", prio_rank, subj_rank, e.get("id", ""))
+        (never if cnt == 0 else heard).append(tup)
+    never.sort(key=lambda t: (t[3], t[4], t[5]))
+    heard.sort(key=lambda t: (t[1], t[2], t[3], t[4], t[5]))
+    return [t[0] for t in never + heard]
+
+
 def _listen_pool(conn, exclude: set[str] | None = None):
     """听学池排序（未听过优先；已听按听过次数少优先、同次数则越久未听越优先），可排除 id 集合。
 
-    返回 (items, remaining)，每条 item 附 listen_count / last_ts 供前端标记已听。
+    返回 (items, remaining)，每条 item 附 listen_count / last_ts / listened_today 供前端标记已听。
     """
     exclude = exclude or set()
     rows = conn.execute(
@@ -407,25 +424,18 @@ def _listen_pool(conn, exclude: set[str] | None = None):
           AND NOT EXISTS (SELECT 1 FROM reviews r
                           WHERE r.entry_id=e.id AND r.mode='listen')
         """).fetchone()["n"]
-    never = []
-    heard = []
+    items: list[dict] = []
     for r in rows:
         if r["id"] in exclude:
             continue
         e = _entry_dict(r)
         e["listen_count"] = r["listen_cnt"]
         e["last_ts"] = r["last_ts"]
-        subject_rank = (scheduler.SUBJECT_ORDER.index(r["subject"])
-                        if r["subject"] in scheduler.SUBJECT_ORDER
-                        else len(scheduler.SUBJECT_ORDER))
-        prio_rank = scheduler.PRIORITY_ORDER.get(r["priority"], 9)
-        item = (e, r["listen_cnt"], r["last_ts"], prio_rank, subject_rank, r["id"])
-        (never if r["listen_cnt"] == 0 else heard).append(item)
-    # never: 未听过优先，按优先级、科目、id 排序
-    never.sort(key=lambda t: (t[3], t[4], t[5]))
-    # heard: 听过次数少优先；同次数则越久未听越优先（last_ts 升序，None 视为最久）
-    heard.sort(key=lambda t: (t[1], t[2] or "", t[3], t[4], t[5]))
-    return [t[0] for t in never + heard], remaining
+        items.append(e)
+    items = _sort_listen_items(items)
+    items = review_stats.attach_listened_today(conn, items)
+    items = review_stats.attach_reviewed_today(conn, items)
+    return items, remaining
 
 
 def listen_queue(conn, limit: int = 100) -> dict:

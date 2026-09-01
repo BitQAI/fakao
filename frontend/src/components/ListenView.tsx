@@ -30,6 +30,7 @@ export default function ListenView() {
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
   const [remaining, setRemaining] = useState(0);
   const [playNonce, setPlayNonce] = useState(0);
+  const [listenedToday, setListenedToday] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<SourceTarget | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const durRef = useRef(0);
@@ -55,6 +56,7 @@ export default function ListenView() {
           startIdx = Math.min(saved.idx, Math.max(items.length - 1, 0));
         }
         setHeardTotal(q.heard_total ?? 0);
+        setListenedToday(new Set(items.filter((i) => i.listened_today).map((i) => i.id)));
         setQueue({ ...q, items });
         setIdx(startIdx);
       })
@@ -225,9 +227,17 @@ export default function ListenView() {
       }
       setQueue(r);
       setHeardTotal(r.heard_total ?? heardTotal);
-      // 自定义范围的 listen_count/last_ts 已由后端 attach_listen_counts 持久化，无需额外合并
       setSeenIds(new Set([...(opts?.exclude ?? []), ...r.items.map((i) => i.id)]));
       setRemaining(Math.max(0, (r.remaining ?? 0) - r.items.length));
+      // 合并今日已听（与看背 reviewedToday 对称）
+      getJson<{ items: { entry_id: string; ts: string }[] }>("/api/reviews/history?mode=listen&limit=500")
+        .then((d) => {
+          const today = new Date().toISOString().slice(0, 10);
+          const todayIds = Array.from(new Set(d.items.filter((it) => it.ts.startsWith(today)).map((it) => it.entry_id)));
+          const newIds = r.items.filter((i) => i.listened_today).map((i) => i.id);
+          setListenedToday(new Set([...todayIds, ...newIds]));
+        })
+        .catch(() => setListenedToday(new Set(r.items.filter((i) => i.listened_today).map((i) => i.id))));
       setCustomRange(range);
       setDeep(false);
       setIdx(0);
@@ -253,8 +263,12 @@ export default function ListenView() {
         setNotice("没有更多听学内容了。");
         return;
       }
-      // 新条目已含 listen_count/last_ts，合并入队列
       setQueue((q) => (q ? { ...q, items: [...q.items, ...r.items], remaining: r.remaining } : q));
+      setListenedToday((prev) => {
+        const next = new Set(prev);
+        r.items.forEach((it) => { if (it.listened_today) next.add(it.id); });
+        return next;
+      });
       setIdx(items.length);
       setPlaying(false);
     } catch (e) {
@@ -266,9 +280,11 @@ export default function ListenView() {
   }
 
   function markExposed() {
-    if (exposedRef.current || durRef.current < 10) return;  // 不足 10s 不视为已听
+    if (exposedRef.current || durRef.current < 10) return;
     exposedRef.current = true;
     if (!entry.listen_count) setHeardTotal((n) => n + 1);
+    setListenedToday((prev) => new Set(prev).add(entry.id));
+    setQueue((q) => q ? { ...q, items: q.items.map((it) => it.id === entry.id ? { ...it, listen_count: (it.listen_count || 0) + 1, listened_today: true } : it) } : q);
     void postJson("/api/reviews", {
       entry_id: entry.id, mode: "listen", result: "exposed",
       duration_sec: Math.round(durRef.current || 0),
@@ -407,13 +423,14 @@ export default function ListenView() {
         <h2>
           {entry.subject} · {entry.point}
           {isMarked && <span className="badge">已标记</span>}
-          {entry.listen_count ? <span className="badge">已听 {entry.listen_count} 次</span> : ""}
+          {(entry.listened_today || listenedToday.has(entry.id)) && <span className="badge">今日已听</span>}
+          {entry.listen_count ? <span className="badge">已听 {entry.listen_count} 次</span> : <span className="badge">未听</span>}
         </h2>
-        <p className="muted">第 {idx + 1} 段 / 队列 {items.length}</p>
         <p className="muted">
-          累计已听 {heardTotal} · 剩余可听 {queue.remaining} · 听学只记暴露，不记掌握
+          第 {idx + 1} 段 / 队列 {items.length} · {entry.listen_count ? `本条已听 ${entry.listen_count} 次` : "本条未听"} · 今日累计 {listenedToday.size} 条 · 累计已听 {heardTotal} · 剩余可听 {queue.remaining}
           {queue.generating ? " · 正在续批生成…" : ""}
         </p>
+        <p className="muted" style={{ fontSize: 12 }}>听学只记暴露，不记掌握</p>
         <audio
           ref={audioRef}
           controls

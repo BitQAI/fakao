@@ -52,6 +52,23 @@ def attach_listen_counts(conn, items: list[dict]) -> list[dict]:
     return items
 
 
+def attach_listened_today(conn, items: list[dict],
+                          day: str | None = None) -> list[dict]:
+    """批量标记条目今天是否已听过（听背进度记忆，对标 attach_reviewed_today）。"""
+    if not items:
+        return items
+    day = day or date.today().isoformat()
+    ids = [it["id"] for it in items]
+    placeholders = ",".join("?" * len(ids))
+    done = {r["entry_id"] for r in conn.execute(
+        f"SELECT DISTINCT entry_id FROM reviews "
+        f"WHERE mode='listen' AND date(ts)=? AND entry_id IN ({placeholders})",
+        [day, *ids])}
+    for it in items:
+        it["listened_today"] = it["id"] in done
+    return items
+
+
 def review_history(conn, limit: int = 100,
                    mode: str | None = None) -> list[dict]:
     """看/听历史：reviews JOIN entries，按时间倒序。"""
