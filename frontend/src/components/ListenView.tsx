@@ -225,6 +225,7 @@ export default function ListenView() {
       }
       setQueue(r);
       setHeardTotal(r.heard_total ?? heardTotal);
+      // 自定义范围的 listen_count/last_ts 已由后端 attach_listen_counts 持久化，无需额外合并
       setSeenIds(new Set([...(opts?.exclude ?? []), ...r.items.map((i) => i.id)]));
       setRemaining(Math.max(0, (r.remaining ?? 0) - r.items.length));
       setCustomRange(range);
@@ -252,6 +253,7 @@ export default function ListenView() {
         setNotice("没有更多听学内容了。");
         return;
       }
+      // 新条目已含 listen_count/last_ts，合并入队列
       setQueue((q) => (q ? { ...q, items: [...q.items, ...r.items], remaining: r.remaining } : q));
       setIdx(items.length);
       setPlaying(false);

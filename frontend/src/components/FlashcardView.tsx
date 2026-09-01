@@ -197,7 +197,15 @@ export default function FlashcardView() {
         date: "", quota: r.items.length, rationale: "自定义范围",
         items: r.items, counts: { retry: 0, review: 0, new: r.items.length },
       });
-      setReviewedToday(new Set(r.items.filter((i) => i.reviewed_today).map((i) => i.id)));
+      // 并行拉取今日已读记录，合并入 reviewedToday 以便刷新后恢复进度
+      getJson<{ items: { entry_id: string; ts: string }[] }>("/api/reviews/history?mode=read&limit=500")
+        .then((d) => {
+          const today = new Date().toISOString().slice(0, 10);
+          const todayIds = Array.from(new Set(d.items.filter((it) => it.ts.startsWith(today)).map((it) => it.entry_id)));
+          const newIds = r.items.filter((i) => i.reviewed_today).map((i) => i.id);
+          setReviewedToday(new Set([...todayIds, ...newIds]));
+        })
+        .catch(() => setReviewedToday(new Set(r.items.filter((i) => i.reviewed_today).map((i) => i.id))));
       setSeenIds(new Set([...(opts?.exclude ?? []), ...r.items.map((i) => i.id)]));
       setRemaining(Math.max(0, r.total - r.items.length));
       setCustomRange(range);

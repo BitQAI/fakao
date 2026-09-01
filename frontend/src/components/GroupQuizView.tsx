@@ -22,6 +22,8 @@ export default function GroupQuizView() {
   const [timeoutMsg, setTimeoutMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [startAt, setStartAt] = useState(Date.now());
+  const [resultMap, setResultMap] = useState<Record<number, AnswerResult>>({});
+  const [pickMap, setPickMap] = useState<Record<number, string[]>>({});
   const submitRef = useRef<(a: string, c?: boolean) => void>(() => undefined);
   submitRef.current = submit;
 
@@ -40,6 +42,7 @@ export default function GroupQuizView() {
       }
       setQuestions(res.questions);
       setIdx(0); setPicked([]); setResult(null);
+      setResultMap({}); setPickMap({});
       setStartAt(Date.now());
       setTimeoutMsg("");
       setSecondsLeft(res.timed ? res.questions.length * 60 : 0);
@@ -77,14 +80,41 @@ export default function GroupQuizView() {
         correct: correctOverride, duration_sec: duration,
       });
       setResult(r);
+      setResultMap((m) => ({ ...m, [idx]: r }));
+      const toStore = answer === "self" ? [] : (answer ? [answer] : [...picked]);
+      if (toStore.length || picked.length) {
+        setPickMap((m) => ({ ...m, [idx]: toStore.length ? toStore : [...picked] }));
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
-  function next() {
-    setPicked([]); setResult(null); setStartAt(Date.now());
-    setIdx((i) => i + 1);
+  function goNext() {
+    const nid = idx + 1;
+    if (nid < questions!.length) {
+      setPicked(pickMap[nid] || []);
+      setResult(resultMap[nid] || null);
+    } else {
+      setPicked([]);
+      setResult(null);
+    }
+    setStartAt(Date.now());
+    setIdx(nid);
+  }
+
+  function goPrev() {
+    if (idx === 0) return;
+    const nid = idx - 1;
+    setPicked(pickMap[nid] || []);
+    setResult(resultMap[nid] || null);
+    setStartAt(Date.now());
+    setIdx(nid);
+  }
+
+  function handleShowAnswer() {
+    // 仅本地展示，未提交前不计入结果；提交时再通过 submit 记录
+    setResult({ correct: false, answer: questions![idx].answer });
   }
 
   function toggle(letter: string) {
@@ -95,6 +125,7 @@ export default function GroupQuizView() {
       setPicked((p) => (p.includes(letter) ? p.filter((x) => x !== letter) : [...p, letter]));
     } else {
       setPicked([letter]);
+      setPickMap((m) => ({ ...m, [idx]: [letter] }));
       void submit(letter);
     }
   }
@@ -139,7 +170,7 @@ export default function GroupQuizView() {
         <h2>{timeoutMsg || "本组完成"}</h2>
         <p className="muted">共 {questions.length} 题，去「报告」看复盘。</p>
         <div className="row">
-          <button className="btn" onClick={() => { setQuestions(null); setIdx(0); }}>
+          <button className="btn" onClick={() => { setQuestions(null); setIdx(0); setResultMap({}); setPickMap({}); }}>
             再组一组
           </button>
         </div>
@@ -204,7 +235,7 @@ export default function GroupQuizView() {
           <div className="options-col">
             <p className="muted">在脑子里补全结论，再看答案自评。</p>
             {!result ? (
-              <button className="btn btn-primary" onClick={() => setResult({ correct: false, answer: q.answer })}>
+              <button className="btn btn-primary" onClick={handleShowAnswer}>
                 显示答案
               </button>
             ) : (
@@ -223,7 +254,17 @@ export default function GroupQuizView() {
             {q.qtype === "cloze" && <p className="muted">正确答案：{result.answer}</p>}
             <div className="analysis"
               dangerouslySetInnerHTML={{ __html: mdToHtml(result.analysis || `正确答案：${result.answer}`) }} />
-            <button className="btn btn-ghost" onClick={next}>下一题</button>
+            <div className="row">
+              <button className="btn btn-ghost" onClick={goNext}>下一题</button>
+              {idx > 0 && (
+                <button className="btn btn-ghost" onClick={goPrev}>上一题</button>
+              )}
+            </div>
+          </div>
+        )}
+        {!result && idx > 0 && (
+          <div className="muted" style={{ marginTop: "8px" }}>
+            <button className="btn btn-ghost" onClick={goPrev}>上一题</button>
           </div>
         )}
       </div>

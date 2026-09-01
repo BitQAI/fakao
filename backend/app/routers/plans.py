@@ -76,5 +76,11 @@ def custom_listen(payload: CustomRangeIn, conn=Depends(db.get_db)):
         conn, payload.subjects, payload.points,
         listen_only=True, exclude=payload.exclude)
     limit = min(payload.limit, 100)
+    heard_total = conn.execute(
+        """
+        SELECT COUNT(DISTINCT r.entry_id) AS n
+        FROM reviews r JOIN entries e ON e.id = r.entry_id
+        WHERE r.mode='listen' AND e.status='final' AND e.tts_text != ''
+        """).fetchone()["n"]
     return {"items": items[:limit], "remaining": len(items),
-            "generating": False, "custom": True}
+            "heard_total": heard_total, "generating": False, "custom": True}

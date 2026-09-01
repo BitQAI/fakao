@@ -28,8 +28,17 @@ class QuizCustomIn(BaseModel):
 
 
 @router.get("/quiz/today")
-def get_quiz(conn=Depends(db.get_db)):
-    return {"questions": quiz_service.build_daily_quiz(conn, date.today().isoformat())}
+def get_quiz(regenerate: bool = False, conn=Depends(db.get_db)):
+    day = date.today().isoformat()
+    if regenerate:
+        conn.execute(
+            "DELETE FROM quiz_answers WHERE quiz_id IN "
+            "(SELECT id FROM quizzes WHERE date(created_at)=?)",
+            (day,),
+        )
+        conn.execute("DELETE FROM quizzes WHERE date(created_at)=?", (day,))
+        conn.commit()
+    return {"questions": quiz_service.build_daily_quiz(conn, day)}
 
 
 @router.get("/quiz/history")
