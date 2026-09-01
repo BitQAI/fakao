@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { mdToHtml } from "@/lib/md";
 
 interface Msg { role: "user" | "ai"; text: string; }
 
@@ -84,7 +85,14 @@ export default function AiChat({
         {messages.length === 0 && <p className="muted">随时提问，答案会引用条目出处。</p>}
         {messages.map((m, i) => (
           <div key={i} className={`chat-msg ${m.role}`}>
-            <div className="chat-bubble">{m.text || "…"}</div>
+            {m.role === "ai" ? (
+              <div
+                className="chat-bubble"
+                dangerouslySetInnerHTML={{ __html: mdToHtml(m.text || "…") }}
+              />
+            ) : (
+              <div className="chat-bubble">{m.text || "…"}</div>
+            )}
           </div>
         ))}
         <div ref={bottomRef} />

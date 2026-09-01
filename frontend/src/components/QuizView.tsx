@@ -18,12 +18,30 @@ export default function QuizView() {
   const [submitting, setSubmitting] = useState(false);
   const [start, setStart] = useState(Date.now());
   const [error, setError] = useState("");
+  const [resultMap, setResultMap] = useState<Record<number, AnswerResult>>({});
+  const [pickMap, setPickMap] = useState<Record<number, string[]>>({});
+  const [showAnswerMap, setShowAnswerMap] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     getJson<{ questions: QuizQuestion[] }>("/api/quiz/today")
       .then((d) => { setQuestions(d.questions); setStart(Date.now()); })
       .catch((e) => setError(String(e)));
   }, []);
+  const handleRegenerate = () => {
+    if (!confirm("重新生成将清空今日题目并重建，确定？")) return;
+    setQuestions(null);
+    setIdx(0);
+    setPicked([]);
+    setResult(null);
+    setShowAnswer(false);
+    setResultMap({});
+    setPickMap({});
+    setShowAnswerMap({});
+    setError("");
+    getJson<{ questions: QuizQuestion[] }>("/api/quiz/today?regenerate=1")
+      .then((d) => { setQuestions(d.questions); setStart(Date.now()); setIdx(0); })
+      .catch((e) => setError(String(e)));
+  };
 
   useEffect(() => {
     if (view === "history" && history === null) {
@@ -40,6 +58,25 @@ export default function QuizView() {
       <div>
         <QuizSegments view={view} setView={setView} />
         <GroupQuizView />
+      </div>
+    );
+  }
+
+  if (view === "today" && !questions) {
+    return (
+      <div className="card center">
+        <h2>今日自测生成中…</h2>
+      </div>
+    );
+  }
+
+  if (view === "today" && questions && idx >= questions.length) {
+    return (
+      <div className="card center">
+        <h2>今日自测完成</h2>
+        <p className="muted">共 {questions.length} 题，去「报告」看复盘。</p>
+        <button className="btn btn-primary"
+          onClick={handleRegenerate}>重新生成</button>
       </div>
     );
   }
@@ -100,14 +137,6 @@ export default function QuizView() {
 
   if (!questions) return <p className="muted">生成题目中…</p>;
   if (questions.length === 0) return <div className="card"><p>今天没有自测题。</p></div>;
-  if (idx >= questions.length) {
-    return (
-      <div className="card center">
-        <h2>今日自测完成</h2>
-        <p className="muted">共 {questions.length} 题，去「报告」看复盘。</p>
-      </div>
-    );
-  }
 
   const q = questions[idx];
   const isMulti = q.qtype === "choice" && q.answer.trim().length > 1;
@@ -121,14 +150,45 @@ export default function QuizView() {
         quiz_id: q.id, user_answer: answer, correct: correctOverride, duration_sec: duration,
       });
       setResult(r);
+      setResultMap((m) => ({ ...m, [idx]: r }));
+      const curPicked = isMulti ? [...picked] : [answer];
+      // cloze 自评时 picked 为空，保留空数组；单选已在 toggle 中设置
+      const toStore = answer === "self" ? [] : curPicked;
+      if (toStore.length) setPickMap((m) => ({ ...m, [idx]: toStore }));
+      else if (picked.length) setPickMap((m) => ({ ...m, [idx]: [...picked] }));
     } finally {
       setSubmitting(false);
     }
   }
 
-  function next() {
-    setPicked([]); setResult(null); setShowAnswer(false); setStart(Date.now());
-    setIdx((i) => i + 1);
+  function goNext() {
+    const nid = idx + 1;
+    if (nid < questions!.length) {
+      setPicked(pickMap[nid] || []);
+      setResult(resultMap[nid] || null);
+      setShowAnswer(showAnswerMap[nid] || false);
+    } else {
+      setPicked([]);
+      setResult(null);
+      setShowAnswer(false);
+    }
+    setStart(Date.now());
+    setIdx(nid);
+  }
+
+  function goPrev() {
+    if (idx === 0) return;
+    const nid = idx - 1;
+    setPicked(pickMap[nid] || []);
+    setResult(resultMap[nid] || null);
+    setShowAnswer(showAnswerMap[nid] || !!resultMap[nid]);
+    setStart(Date.now());
+    setIdx(nid);
+  }
+
+  function handleShowAnswer() {
+    setShowAnswer(true);
+    setShowAnswerMap((m) => ({ ...m, [idx]: true }));
   }
 
   function toggle(letter: string) {
@@ -137,6 +197,7 @@ export default function QuizView() {
       setPicked((p) => (p.includes(letter) ? p.filter((x) => x !== letter) : [...p, letter]));
     } else {
       setPicked([letter]);
+      setPickMap((m) => ({ ...m, [idx]: [letter] }));
       void submit(letter);
     }
   }
@@ -190,14 +251,14 @@ export default function QuizView() {
         ) : (
           <div className="options-col">
             <p className="muted">在脑子里补全结论，再看答案自评。</p>
-            {!showAnswer ? (
-              <button className="btn btn-primary" onClick={() => setShowAnswer(true)}>显示答案</button>
-            ) : (
+            {!showAnswer && !result ? (
+              <button className="btn btn-primary" onClick={handleShowAnswer}>显示答案</button>
+            ) : !result ? (
               <div className="row">
                 <button className="btn btn-good" onClick={() => void submit("self", true)}>答对了</button>
                 <button className="btn btn-bad" onClick={() => void submit("self", false)}>答错了</button>
               </div>
-            )}
+            ) : null}
           </div>
         )}
         {result && (
@@ -208,7 +269,22 @@ export default function QuizView() {
             )}
             {q.qtype === "cloze" && <p className="muted">正确答案：{result.answer}</p>}
             <div className="analysis" dangerouslySetInnerHTML={{ __html: mdToHtml(result.analysis || `正确答案：${result.answer}`) }} />
-            <button className="btn btn-ghost" onClick={next}>下一题</button>
+            <div className="row">
+              <button className="btn btn-ghost" onClick={goNext}>下一题</button>
+              {idx > 0 && (
+                <button className="btn btn-ghost" onClick={goPrev}>上一题</button>
+              )}
+            </div>
+          </div>
+        )}
+        {!result && idx > 0 && (
+          <div className="muted" style={{ marginTop: "8px" }}>
+            <button className="btn btn-ghost" onClick={goPrev}>上一题</button>
+          </div>
+        )}
+        {view === "today" && !result && (
+          <div className="muted" style={{ marginTop: "8px" }}>
+            <button className="btn btn-primary" onClick={handleRegenerate} disabled={submitting}>重新生成</button>
           </div>
         )}
       </div>
