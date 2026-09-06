@@ -32,6 +32,23 @@ def get_entry(entry_id: str, conn=Depends(db.get_db)):
     return e
 
 
+class UpdateEntryIn(BaseModel):
+    point: str
+    anchor: str
+    conclusion: str
+    priority: str
+    note: str | None = None
+
+
+@router.put("/entries/{entry_id}")
+def update_entry(entry_id: str, payload: UpdateEntryIn, conn=Depends(db.get_db)):
+    """看背就地更正：仅文本字段，不碰 tts/音频。"""
+    entry, err = service.update_entry_text(conn, entry_id, payload.model_dump())
+    if err is not None:
+        raise HTTPException(400 if entry is None and err != "条目不存在" else 404, err)
+    return entry
+
+
 @router.get("/plans/today")
 def get_today_plan(conn=Depends(db.get_db)):
     return service.ensure_today_plan(conn, date.today().isoformat())
@@ -46,8 +63,9 @@ def regenerate_plan(conn=Depends(db.get_db)):
 
 
 @router.get("/listen")
-def listen(conn=Depends(db.get_db)):
-    data = service.listen_queue(conn)
+def listen(limit: int = 10, conn=Depends(db.get_db)):
+    limit = min(max(int(limit), 1), 50)
+    data = service.listen_queue(conn, limit=limit)
     data["generating"] = service.ensure_listen_pool(conn)
     return data
 
