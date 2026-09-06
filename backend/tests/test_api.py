@@ -248,3 +248,53 @@ def test_statute_missing_404(client, tmp_path, monkeypatch):
     statutes._LAW_FILE_CACHE.clear()
     r = client.get("/api/statute", params={"law": "刑法", "no": "999"})
     assert r.status_code == 404
+
+
+def test_listen_limit_param(client, monkeypatch):
+    from app import service
+    monkeypatch.setattr(service, "ensure_listen_pool", lambda conn, threshold=50: False)
+    data = client.get("/api/listen", params={"limit": 1}).json()
+    assert len(data["items"]) == 1
+    # 非法值应钳制而非 500
+    assert client.get("/api/listen", params={"limit": 0}).status_code == 200
+
+
+def test_update_entry_text_ok_and_validation(client):
+    good = {
+        "point": "转化型抢劫修正",
+        "anchor": "甲盗窃后被失主当场扭住，为挣脱反抗将失主打成轻伤呀",
+        "conclusion": "成立抢劫罪。",
+        "priority": "易错陷阱",
+        "note": "注意当场性。",
+    }
+    r = client.put("/api/entries/XF-001", json=good)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["point"] == "转化型抢劫修正"
+    assert data["priority"] == "易错陷阱"
+    # tts/音频字段不受影响，条目仍为 final 可查
+    assert data["tts_text"].startswith("【刑法·转化型抢劫】")
+    assert client.get("/api/entries/XF-001").json()["note"] == "注意当场性。"
+    # 锚点过短 → 400
+    bad = dict(good, anchor="太短了")
+    assert client.put("/api/entries/XF-001", json=bad).status_code == 400
+    # 结论不以句号结尾 → 400
+    bad2 = dict(good, conclusion="成立抢劫罪")
+    assert client.put("/api/entries/XF-001", json=bad2).status_code == 400
+    # 非法优先级 → 400
+    bad3 = dict(good, priority="必考")
+    assert client.put("/api/entries/XF-001", json=bad3).status_code == 400
+    # 不存在 → 404
+    assert client.put("/api/entries/NOPE-001", json=good).status_code == 404
+
+
+def test_assistant_history_by_entry(client):
+    r = client.post("/api/assistant/ask", json={"question": "转化型抢劫是什么", "entry_id": "XF-001"})
+    assert r.status_code == 200
+    items = client.get("/api/assistant/history", params={"entry_id": "XF-001"}).json()["items"]
+    assert len(items) >= 1
+    assert "XF-001" in items[0]["related_entry_ids"]
+    assert "转化型抢劫是什么" in items[0]["question"]
+    # 前缀 id 不得误配：XF-001 的记录不应出现在 XF-0010 下
+    assert client.get("/api/assistant/history", params={"entry_id": "XF-0010"}).json()["items"] == []
+    assert client.get("/api/assistant/history", params={"entry_id": " "}).status_code == 400

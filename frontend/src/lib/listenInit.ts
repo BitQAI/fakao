@@ -3,6 +3,10 @@ import { readSavedQueue } from "@/lib/progressStore";
 import { readListenCustom, clearListenCustom } from "@/lib/progressStore";
 import type { Entry, ListenPayload } from "@/lib/types";
 
+/** 听学分页：首屏取 10 条，剩 3 条时后台续取 10 条（见 ListenView 自动续取）。 */
+export const LISTEN_PAGE = 10;
+export const LISTEN_THRESHOLD = 3;
+
 export async function loadListenInitial(entryParam: string | null): Promise<{
   queue: ListenPayload;
   idx: number;
@@ -20,7 +24,7 @@ export async function loadListenInitial(entryParam: string | null): Promise<{
       const r = await postJson<ListenPayload>("/api/listen/custom", {
         subjects: custom.range.subjects,
         points: custom.range.points,
-        limit: custom.limit || 100,
+        limit: custom.limit || LISTEN_PAGE,
         exclude: custom.exclude || [],
       });
       if (r.items.length) {
@@ -35,7 +39,7 @@ export async function loadListenInitial(entryParam: string | null): Promise<{
         } catch {}
         let heardTotal = r.heard_total ?? 0;
         try {
-          const q = await getJson<ListenPayload>("/api/listen");
+          const q = await getJson<ListenPayload>(`/api/listen?limit=${LISTEN_PAGE}`);
           heardTotal = q.heard_total ?? heardTotal;
         } catch {}
         return {
@@ -54,7 +58,7 @@ export async function loadListenInitial(entryParam: string | null): Promise<{
       clearListenCustom();
     }
   }
-  const [q, target] = await Promise.all([getJson<ListenPayload>("/api/listen"), targetReq]);
+  const [q, target] = await Promise.all([getJson<ListenPayload>(`/api/listen?limit=${LISTEN_PAGE}`), targetReq]);
   let items = q.items;
   let deep = false;
   if (target) {

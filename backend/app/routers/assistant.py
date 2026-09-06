@@ -15,6 +15,13 @@ class AskIn(BaseModel):
     entry_id: str | None = None
 
 
+@router.get("/assistant/history")
+def chat_history(entry_id: str, limit: int = 20, conn=Depends(db.get_db)):
+    if not entry_id.strip():
+        raise HTTPException(400, "entry_id 不能为空")
+    return {"items": service.chat_history_for_entry(conn, entry_id.strip(), limit)}
+
+
 @router.post("/assistant/ask")
 def ask(payload: AskIn, conn=Depends(db.get_db)):
     question = payload.question.strip()

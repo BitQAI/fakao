@@ -438,9 +438,14 @@ def _listen_pool(conn, exclude: set[str] | None = None):
     return items, remaining
 
 
-def listen_queue(conn, limit: int = 100) -> dict:
+def listen_queue(conn, limit: int = 10) -> dict:
     """听学池：未听过优先，已听按最近听过倒序；返回已听标记与累计进度。"""
     items, remaining = _listen_pool(conn)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 10
+    limit = min(max(limit, 1), 500)
     slice_items = items[:limit]
     heard_total = conn.execute(
         """
@@ -464,3 +469,69 @@ def ensure_listen_pool(conn, threshold: int = 50) -> bool:
     if listen_queue(conn, limit=1)["remaining"] >= threshold:
         return False
     return generator.ensure_generation(conn)
+
+
+ENTRY_TEXT_PRIORITIES = ("高频考点", "易错陷阱", "新增必考", "普通")
+
+
+def update_entry_text(conn, entry_id: str, fields: dict) -> tuple[dict | None, str | None]:
+    """看背就地更正：仅允许文本字段（不碰 tts/音频/status）。
+
+    返回 (entry, error)：成功时 error 为 None；失败时 entry 为 None。
+    校验对齐 importer（锚点 16-36 字、结论 ≤60 且以“。”结尾、priority 枚举）。
+    """
+    row = conn.execute("SELECT id FROM entries WHERE id=? AND status='final'",
+                       (entry_id,)).fetchone()
+    if row is None:
+        return None, "条目不存在"
+    point = (fields.get("point") or "").strip()
+    anchor = (fields.get("anchor") or "").strip()
+    conclusion = (fields.get("conclusion") or "").strip()
+    priority = (fields.get("priority") or "").strip()
+    note = fields.get("note")
+    note = None if note is None or not str(note).strip() else str(note).strip()
+    if not point:
+        return None, "point 不能为空"
+    if not 16 <= len(anchor) <= 36:
+        return None, f"锚点句长度 {len(anchor)} 不在 16-36 内"
+    if not conclusion or len(conclusion) > 60 or not conclusion.endswith("。"):
+        return None, "结论句超长或未以句号结尾（≤60 且以“。”结尾）"
+    if priority not in ENTRY_TEXT_PRIORITIES:
+        return None, f"优先级非法: {priority!r}"
+    conn.execute(
+        "UPDATE entries SET point=?, anchor=?, conclusion=?, note=?, priority=? "
+        "WHERE id=?",
+        (point, anchor, conclusion, note, priority, entry_id),
+    )
+    conn.commit()
+    return entry_by_id(conn, entry_id), None
+
+
+def chat_history_for_entry(conn, entry_id: str, limit: int = 20) -> list[dict]:
+    """按条目取 AI 问答历史：Python 侧解析 related_entry_ids 精确匹配。
+
+    不用 LIKE，避免 XF-001 误配 XF-0010 等前缀 id。
+    """
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 20
+    limit = min(max(limit, 1), 50)
+    rows = conn.execute(
+        "SELECT id, ts, question, answer, related_entry_ids FROM chat_logs "
+        "ORDER BY id DESC LIMIT 200"
+    ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            ids = json.loads(r["related_entry_ids"] or "[]")
+        except (ValueError, TypeError):
+            ids = []
+        if entry_id in ids:
+            out.append({
+                "id": r["id"], "ts": r["ts"], "question": r["question"],
+                "answer": r["answer"], "related_entry_ids": ids,
+            })
+        if len(out) >= limit:
+            break
+    return out

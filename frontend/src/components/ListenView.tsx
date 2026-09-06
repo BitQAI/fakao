@@ -11,7 +11,7 @@ import type { Entry, ListenPayload, MarkItem } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 import { ListenMarksPanel } from "./ListenMarksPanel";
-import { loadListenInitial } from "@/lib/listenInit";
+import { loadListenInitial, LISTEN_PAGE, LISTEN_THRESHOLD } from "@/lib/listenInit";
 
 const QUEUE_STORE_KEY = "fakao.listen.queue.v1";
 
@@ -35,6 +35,10 @@ export default function ListenView() {
   const [playNonce, setPlayNonce] = useState(0);
   const [listenedToday, setListenedToday] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<SourceTarget | null>(null);
+  const [statute, setStatute] = useState<string | null>(null);
+  const [showText, setShowText] = useState(false);
+  const [prefetching, setPrefetching] = useState(false);
+  const prefetchRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const durRef = useRef(0);
   const exposedRef = useRef(false);
@@ -60,11 +64,11 @@ export default function ListenView() {
           const todayIds = Array.from(new Set(d.items.filter((it) => it.ts.startsWith(today)).map((it) => it.entry_id)));
           setListenedToday((prev) => new Set([...todayIds, ...Array.from(prev)]));
         }).catch(() => {});
-      getJson<ListenPayload>("/api/listen").then((q) => setHeardTotal((h) => q.heard_total ?? h)).catch(() => {});
+      getJson<ListenPayload>(`/api/listen?limit=${LISTEN_PAGE}`).then((q) => setHeardTotal((h) => q.heard_total ?? h)).catch(() => {});
       postJson<ListenPayload>("/api/listen/custom", {
         subjects: customMeta.range.subjects,
         points: customMeta.range.points,
-        limit: customMeta.limit || 100,
+        limit: customMeta.limit || LISTEN_PAGE,
         exclude: customMeta.exclude || [],
       }).then((fresh) => {
         const freshMap = new Map(fresh.items.map((it) => [it.id, it as any]));
@@ -114,7 +118,61 @@ export default function ListenView() {
     }
   }, [queue, idx, customRange]);
 
-  useEffect(() => { durRef.current = 0; exposedRef.current = false; }, [idx]);
+  useEffect(() => { durRef.current = 0; exposedRef.current = false; setShowText(false); }, [idx]);
+
+  // 预加载：剩 LISTEN_THRESHOLD 条时后台静默续取 LISTEN_PAGE 条（只追加不跳段）
+  useEffect(() => {
+    if (!queue || queue.items.length === 0 || idx >= queue.items.length) return;
+    const left = queue.items.length - 1 - idx;
+    if (left > LISTEN_THRESHOLD) return;
+    const hasMore = queue.custom ? remaining > 0 : queue.remaining > 0;
+    if (!hasMore || prefetchRef.current || loadingMore) return;
+    prefetchRef.current = true;
+    setPrefetching(true);
+    const curIds = queue.items.map((i) => i.id);
+    const job = queue.custom && customRange
+      ? postJson<ListenPayload>("/api/listen/custom", {
+          subjects: customRange.subjects, points: customRange.points,
+          limit: LISTEN_PAGE, exclude: Array.from(new Set(Array.from(seenIds).concat(curIds))),
+        }).then((r) => {
+          if (!r.items.length) { setRemaining(0); return; }
+          const fresh = r.items.filter((it) => !curIds.includes(it.id));
+          if (!fresh.length) { setRemaining(0); return; }
+          setQueue((q) => (q ? { ...q, items: [...q.items, ...fresh], remaining: r.remaining } : q));
+          setSeenIds((prev) => new Set(Array.from(prev).concat(fresh.map((i) => i.id))));
+          setRemaining(Math.max(0, (r.remaining ?? 0) - fresh.length));
+          if (r.heard_total !== undefined) setHeardTotal(r.heard_total);
+          setListenedToday((prev) => {
+            const next = new Set(prev);
+            fresh.forEach((it) => { if ((it as any).listened_today) next.add(it.id); });
+            return next;
+          });
+        })
+      : postJson<ListenPayload>("/api/listen/more", { count: LISTEN_PAGE, exclude: curIds }).then((r) => {
+          if (!r.items.length) {
+            // 全部未听已在队列中，无更新可取时停，避免剩 3 条阈值反复触发
+            setQueue((q) => (q ? { ...q, remaining: 0 } : q));
+            return;
+          }
+          setQueue((q) => (q ? { ...q, items: [...q.items, ...r.items], remaining: r.remaining } : q));
+          setListenedToday((prev) => {
+            const next = new Set(prev);
+            r.items.forEach((it) => { if ((it as any).listened_today) next.add(it.id); });
+            return next;
+          });
+        });
+    void job.catch(() => {}).finally(() => { prefetchRef.current = false; setPrefetching(false); });
+  }, [queue, idx, loadingMore, customRange, seenIds, remaining]);
+
+  // 音频预热：提前加载下一条，避免切换时等待合成
+  useEffect(() => {
+    if (!queue || idx >= queue.items.length) return;
+    const nextItem = queue.items[idx + 1];
+    if (!nextItem) return;
+    const a = new Audio(`/api/audio/${nextItem.id}`);
+    a.preload = "auto";
+    return () => { a.pause(); a.removeAttribute("src"); };
+  }, [queue, idx]);
 
   async function removeMark(m: MarkItem) { try { await delJson(`/api/marks/${m.id}`); setMarked((p) => p.filter((x) => x.id !== m.id)); } catch (e) { setNotice("取消失败：" + String(e)); } }
   async function clearMarks() { try { await delJson("/api/marks"); setMarked([]); } catch (e) { setNotice("清空失败：" + String(e)); } }
@@ -197,7 +255,7 @@ export default function ListenView() {
     setLoadingMore(true); setNotice("");
     try {
       const exclude = opts?.exclude ?? [];
-      const limit = opts?.limit ?? 100;
+      const limit = opts?.limit ?? LISTEN_PAGE;
       const r = await postJson<ListenPayload>("/api/listen/custom", { subjects: range.subjects, points: range.points, limit, exclude });
       if (!r.items.length) {
         if (exclude.length) setRemaining(0);
@@ -264,7 +322,7 @@ export default function ListenView() {
       {deep && idx === 0 && <p className="muted">已定位到目标条目，可先听该条，其余按队列继续。</p>}
       <div className="card center">
         <h2>{entry.subject} · {entry.point}{isMarked && <span className="badge">已标记</span>}{(entry.listened_today || listenedToday.has(entry.id)) && <span className="badge">今日已听</span>}{entry.listen_count ? <span className="badge">已听 {entry.listen_count} 次</span> : <span className="badge">未听</span>}</h2>
-        <p className="muted">第 {idx + 1} 段 / 队列 {items.length} · {entry.listen_count ? `本条已听 ${entry.listen_count} 次` : "本条未听"} · 今日累计 {listenedToday.size} 条 · 累计已听 {heardTotal} · 剩余可听 {queue.remaining}{queue.generating ? " · 正在续批生成…" : ""}</p>
+        <p className="muted">第 {idx + 1} 段 / 队列 {items.length} · {entry.listen_count ? `本条已听 ${entry.listen_count} 次` : "本条未听"} · 今日累计 {listenedToday.size} 条 · 累计已听 {heardTotal} · 剩余可听 {queue.remaining}{queue.generating ? " · 正在续批生成…" : ""}{prefetching ? " · 后面内容加载中…" : ""}</p>
         <p className="muted" style={{ fontSize: 12 }}>听学只记暴露，不记掌握</p>
         <audio ref={audioRef} controls autoPlay key={`${entry.id}-${playNonce}`} src={`/api/audio/${entry.id}`} onLoadedMetadata={(e) => { durRef.current = Math.round(e.currentTarget.duration || 0); }} onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); markExposed(); }} onEnded={() => { markExposed(); next(); }} onError={() => setError("音频生成中或不可用，请稍后重试")} />
         <div className="row">
@@ -272,9 +330,29 @@ export default function ListenView() {
           <button className="btn btn-ghost" onClick={toggleMark}>{isMarked ? "已标记 ✓" : "标记"}</button>
           <button className="btn btn-ghost" onClick={next}>{playing ? "跳过" : "下一段"}</button>
         </div>
+        <div className="row">
+          <button className="btn btn-ghost" onClick={() => setShowText((s) => !s)}>
+            {showText ? "收起原文" : "显示原文"}
+          </button>
+        </div>
+        {showText && (
+          <div className="analysis" style={{ textAlign: "left" }}>
+            <p><b>场景：</b>{entry.anchor}</p>
+            <p><b>结论：</b>{entry.conclusion}</p>
+            {entry.note && <p className="note">⚠ {entry.note}</p>}
+            {entry.tts_text && <p className="muted">播报文本：{entry.tts_text}</p>}
+            {entry.statutes.length > 0 && (
+              <div className="source-chips" style={{ marginTop: 8 }}>
+                {entry.statutes.map((st, i) => (
+                  <button key={i} className="chip" onClick={() => setStatute(st)}>{st}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {entry.cases.length > 0 && <div className="source-chips" style={{ justifyContent: "center" }}>{entry.cases.map((c, i) => (<button key={i} className="chip" onClick={() => setSource({ kind: "case", ref: c.source, loc: c.loc })}>查看原文 · 案例 {i + 1}</button>))}</div>}
       </div>
-      <SourceViewer source={source} onClose={() => setSource(null)} />
+      <SourceViewer source={source} statute={statute} onClose={() => { setSource(null); setStatute(null); }} />
       {marksOpen && <div className="source-modal" onClick={() => setMarksOpen(false)}><div className="source-panel" onClick={(e) => e.stopPropagation()}><ListenMarksPanel marked={marked} onClose={() => setMarksOpen(false)} onRemove={removeMark} onReplay={replayMarked} onView={viewMarked} onClear={clearMarks} /></div></div>}
       <CustomRangePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onConfirm={(r) => void applyCustom(r)} />
     </div>

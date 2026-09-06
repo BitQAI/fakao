@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { getJson, postJson } from "@/lib/api";
+import { getJson, postJson, putJson } from "@/lib/api";
 import { readSavedQueue, writeSavedQueue } from "@/lib/progressStore";
 import type { Entry, Plan } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
@@ -29,6 +29,15 @@ export default function FlashcardView() {
   const [remaining, setRemaining] = useState(0);
   const [source, setSource] = useState<SourceTarget | null>(null);
   const [statute, setStatute] = useState<string | null>(null);
+  const [aiCount, setAiCount] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [fPoint, setFPoint] = useState("");
+  const [fAnchor, setFAnchor] = useState("");
+  const [fConclusion, setFConclusion] = useState("");
+  const [fPriority, setFPriority] = useState("高频考点");
+  const [fNote, setFNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const aiCountCache = useRef<Map<string, number>>(new Map());
   const startRef = useRef(Date.now());
 
   useEffect(() => {
@@ -92,6 +101,40 @@ export default function FlashcardView() {
     setPlan(p);
     setIndex(startIdx);
   }
+
+  const currentId = plan?.items[index]?.id ?? null;
+  const currentIdRef = useRef<string | null>(null);
+  currentIdRef.current = currentId;
+
+  // 同一条目问过 AI 则显示历史徽标（结果缓存，进卡即查）
+  useEffect(() => {
+    if (!currentId) return;
+    const cached = aiCountCache.current.get(currentId);
+    if (cached !== undefined) { setAiCount(cached); return; }
+    setAiCount(null);
+    let cancelled = false;
+    getJson<{ items: unknown[] }>(
+      `/api/assistant/history?entry_id=${encodeURIComponent(currentId)}&limit=50`
+    ).then((d) => {
+      if (cancelled) return;
+      aiCountCache.current.set(currentId, d.items.length);
+      setAiCount(d.items.length);
+    }).catch(() => { if (!cancelled) setAiCount(null); });
+    return () => { cancelled = true; };
+  }, [currentId]);
+
+  // AI 问答成功后刷新徽标（AiChat 通过 ai-asked 事件通知）
+  useEffect(() => {
+    function handler(e: Event) {
+      const id = (e as CustomEvent<{ entry_id?: string }>).detail?.entry_id;
+      if (!id) return;
+      const next = (aiCountCache.current.get(id) ?? 0) + 1;
+      aiCountCache.current.set(id, next);
+      if (currentIdRef.current === id) setAiCount(next);
+    }
+    window.addEventListener("ai-asked", handler);
+    return () => window.removeEventListener("ai-asked", handler);
+  }, []);
 
   if (error) return <p className="muted">加载失败：{error}</p>;
   if (!plan) return <p className="muted">加载中…</p>;
@@ -265,8 +308,42 @@ export default function FlashcardView() {
 
   function askAi() {
     window.dispatchEvent(new CustomEvent("ask-ai", {
-      detail: { entry_id: entry.id, question: `讲解「${entry.point}」的要点和易错点` },
+      detail: {
+        entry_id: entry.id,
+        question: `讲解「${entry.point}」的要点和易错点`,
+        title: entry.point,
+        description: `场景：${entry.anchor}\n结论：${entry.conclusion}`,
+      },
     }));
+  }
+
+  function openEdit() {
+    setFPoint(entry.point);
+    setFAnchor(entry.anchor);
+    setFConclusion(entry.conclusion);
+    setFPriority(entry.priority);
+    setFNote(entry.note ?? "");
+    setNotice("");
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (saving) return;
+    setSaving(true);
+    setNotice("");
+    try {
+      const updated = await putJson<Entry>(`/api/entries/${encodeURIComponent(entry.id)}`, {
+        point: fPoint.trim(), anchor: fAnchor.trim(), conclusion: fConclusion.trim(),
+        priority: fPriority, note: fNote.trim() || null,
+      });
+      setPlan((p) => (p ? { ...p, items: p.items.map((it) => (it.id === entry.id ? { ...updated, bucket: (it as Entry).bucket } : it)) } : p));
+      setEditing(false);
+      setNotice("已保存更正。");
+    } catch (e) {
+      setNotice("保存失败：" + String(e));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -336,7 +413,10 @@ export default function FlashcardView() {
               </div>
             )}
             <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); askAi(); }}>
-              问 AI
+              问 AI{aiCount ? ` · ${aiCount}条历史` : ""}
+            </button>
+            <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); openEdit(); }}>
+              编辑
             </button>
           </div>
         </div>
@@ -369,6 +449,52 @@ export default function FlashcardView() {
           下一个
         </button>
       </div>
+      {editing && (
+        <div className="source-modal" onClick={() => setEditing(false)}>
+          <div className="source-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="ai-chat-head">
+              <b>更正条目 · {entry.id}</b>
+              <button onClick={() => setEditing(false)}>×</button>
+            </div>
+            <div className="source-body">
+              <label className="field">标题 point
+                <input value={fPoint} onChange={(e) => setFPoint(e.target.value)} maxLength={60} />
+              </label>
+              <label className="field">场景 anchor（{fAnchor.trim().length}/16–36 字）
+                <input value={fAnchor} onChange={(e) => setFAnchor(e.target.value)} maxLength={40} />
+              </label>
+              <label className="field">结论 conclusion（{fConclusion.trim().length}/≤60 字，以“。”结尾）
+                <input value={fConclusion} onChange={(e) => setFConclusion(e.target.value)} maxLength={70} />
+              </label>
+              <div className="field">优先级 priority
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {["高频考点", "易错陷阱", "新增必考", "普通"].map((p) => (
+                    <button
+                      key={p}
+                      className={`badge-btn${fPriority === p ? "" : ""}`}
+                      style={fPriority === p ? { background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" } : undefined}
+                      onClick={() => setFPriority(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="field">备注 note（可空）
+                <input value={fNote} onChange={(e) => setFNote(e.target.value)} maxLength={100} />
+              </label>
+              <p className="muted" style={{ fontSize: 12 }}>仅改文本，不影响音频；法条/案例结构如需调整请走数据导入。</p>
+              <div className="row">
+                <button className="btn" onClick={() => setEditing(false)}>取消</button>
+                <button className="btn btn-primary" disabled={saving} onClick={() => void saveEdit()}>
+                  {saving ? "保存中…" : "保存"}
+                </button>
+              </div>
+              {notice && <p className="muted">{notice}</p>}
+            </div>
+          </div>
+        </div>
+      )}
       <SourceViewer
         source={source}
         statute={statute}
