@@ -171,7 +171,7 @@ export default function AiChat({
         <b>AI 助手</b>
         <button onClick={onClose}>×</button>
       </div>
-      {(title || description) && (
+      {(title || description) ? (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "8px 12px 0" }}>
           {title && (
             <>
@@ -186,6 +186,13 @@ export default function AiChat({
             </>
           )}
           {tip && <span className="muted" style={{ fontSize: 12 }}>{tip}</span>}
+        </div>
+      ) : (
+        <div style={{ padding: "8px 12px 0" }}>
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+            从看背卡片点「问 AI」，可带标题 / 描述快捷填入与历史问答。
+            {tip && ` · ${tip}`}
+          </p>
         </div>
       )}
       {entryId && history.length > 0 && (
@@ -212,12 +219,20 @@ export default function AiChat({
       <div className="ai-chat-body">
         {messages.length === 0 && <p className="muted">随时提问，答案会引用条目出处。</p>}
         {messages.map((m, i) => (
-          <div key={i} className={`chat-msg ${m.role}`}>
+          <div key={i} className={`chat-msg ${m.role}`} style={{ flexDirection: "column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
             {m.role === "ai" ? (
-              <div
-                className="chat-bubble"
-                dangerouslySetInnerHTML={{ __html: mdToHtml(m.text || "…") }}
-              />
+              <>
+                <div
+                  className="chat-bubble"
+                  style={{ maxWidth: "100%" }}
+                  dangerouslySetInnerHTML={{ __html: mdToHtml(m.text || "…") }}
+                />
+                {m.text && (
+                  <button className="badge-btn" style={{ marginTop: 4 }} onClick={() => void handleCopy(m.text, "回答")}>
+                    复制回答
+                  </button>
+                )}
+              </>
             ) : (
               <div className="chat-bubble">{m.text || "…"}</div>
             )}

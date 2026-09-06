@@ -26,8 +26,8 @@ export default function AiFab() {
 
   return (
     <>
-      <button className="ai-fab" onClick={() => setOpen((o) => !o)} aria-label="AI 助手">
-        <IconAi />
+      <button className="ai-fab" onClick={() => setOpen((o) => !o)} aria-label={open ? "关闭 AI 助手" : "AI 助手"}>
+        {open ? <span className="ai-fab-x">×</span> : <IconAi />}
       </button>
       <AiChat open={open} onClose={() => setOpen(false)} prefill={prefill} />
     </>
