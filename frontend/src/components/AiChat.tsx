@@ -49,7 +49,8 @@ export default function AiChat({
   const [description, setDescription] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  // 默认全部展开（与对话区一致的完整渲染）；用户可逐条收起，collapsedIds 记录被收起的 id
+  const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set());
   const [tip, setTip] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -126,8 +127,8 @@ export default function AiChat({
     ).then((d) => setHistory(d.items)).catch(() => {});
   }
 
-  function toggleExpanded(id: number) {
-    setExpandedIds((prev) => {
+  function toggleCollapsed(id: number) {
+    setCollapsedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -247,13 +248,26 @@ export default function AiChat({
       )}
       {entryId && history.length > 0 && (
         <div style={{ padding: "8px 12px 0" }}>
-          <button className="badge-btn" onClick={() => setShowHistory((s) => !s)}>
-            {showHistory ? "收起历史问答" : `历史问答（${history.length}）`}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button className="badge-btn" onClick={() => setShowHistory((s) => !s)}>
+              {showHistory ? "收起历史问答" : `历史问答（${history.length}）`}
+            </button>
+            {showHistory && (
+              collapsedIds.size >= history.length ? (
+                <button className="badge-btn" onClick={() => setCollapsedIds(new Set())}>
+                  全部展开
+                </button>
+              ) : (
+                <button className="badge-btn" onClick={() => setCollapsedIds(new Set(history.map((h) => h.id)))}>
+                  全部收起
+                </button>
+              )
+            )}
+          </div>
           {showHistory && (
             <div className="ai-history-list">
               {history.map((h) => {
-                const expanded = expandedIds.has(h.id);
+                const collapsed = collapsedIds.has(h.id);
                 const preview = h.answer.replace(/\s+/g, " ").slice(0, 120);
                 return (
                   <div key={h.id} className="ai-history-item">
@@ -262,7 +276,11 @@ export default function AiChat({
                     <div className="chat-msg user" style={{ flexDirection: "column", alignItems: "flex-end" }}>
                       <div className="chat-bubble">{h.question}</div>
                     </div>
-                    {expanded ? (
+                    {collapsed ? (
+                      <p className="muted ai-history-preview">
+                        答：{preview}{h.answer.length > 120 ? "…" : ""}
+                      </p>
+                    ) : (
                       <>
                         {/* 回答：与对话区 AI 气泡同款 Markdown 渲染 */}
                         <div className="chat-msg ai" style={{ flexDirection: "column", alignItems: "flex-start" }}>
@@ -281,14 +299,10 @@ export default function AiChat({
                           </p>
                         )}
                       </>
-                    ) : (
-                      <p className="muted ai-history-preview">
-                        答：{preview}{h.answer.length > 120 ? "…" : ""}
-                      </p>
                     )}
                     <div className="ai-history-actions">
-                      <button className="badge-btn" onClick={() => toggleExpanded(h.id)}>
-                        {expanded ? "收起全文" : "展开全文"}
+                      <button className="badge-btn" onClick={() => toggleCollapsed(h.id)}>
+                        {collapsed ? "展开全文" : "收起全文"}
                       </button>
                       <button className="badge-btn" onClick={() => { setInput(h.question); setShowHistory(false); requestAnimationFrame(() => { autosize(); taRef.current?.focus(); }); }}>
                         回填这个问题
