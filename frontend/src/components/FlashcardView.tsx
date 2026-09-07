@@ -296,6 +296,12 @@ export default function FlashcardView() {
       });
       startRef.current = Date.now();
       setReviewedToday((prev) => new Set(prev).add(entry.id));
+      setPlan((p) => (p ? {
+        ...p,
+        items: p.items.map((it) => (it.id === entry.id
+          ? { ...it, read_count: (it.read_count || 0) + 1, reviewed_today: true }
+          : it)),
+      } : p));
       setFlipped(false);
       setDone((d) => d + 1);
       setIndex((i) => i + 1);
@@ -361,7 +367,7 @@ export default function FlashcardView() {
       {notice && <p className="muted">{notice}</p>}
       <p className="muted">
         {index + 1} / {items.length} · 本次完成 {done} 张 · 今日累计 {reviewedToday.size} 条
-        {entry.read_count ? ` · 本条已看 ${entry.read_count} 次` : ""}
+        {entry.read_count ? ` · 本条已看 ${entry.read_count} 次` : " · 本条未看"}
       </p>
       <div className={`flashcard${flipped ? " flipped" : ""}`} onClick={() => setFlipped((f) => !f)}>
         <div className="flashcard-inner">
@@ -371,6 +377,11 @@ export default function FlashcardView() {
               {entry.point}
               {(entry.reviewed_today || reviewedToday.has(entry.id)) && (
                 <span className="badge">今日已看</span>
+              )}
+              {entry.read_count ? (
+                <span className="badge">已看 {entry.read_count} 次</span>
+              ) : (
+                <span className="badge">未看</span>
               )}
             </h2>
             <p>{entry.anchor}</p>

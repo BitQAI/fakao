@@ -91,7 +91,9 @@ def ensure_today_plan(conn, day: str | None = None) -> dict:
                (SELECT r.result FROM reviews r WHERE r.entry_id=e.id
                 ORDER BY r.ts DESC LIMIT 1) AS last_result,
                EXISTS(SELECT 1 FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id
-                      WHERE q.entry_id=e.id AND qa.correct=0) AS wrong_ever
+                      WHERE q.entry_id=e.id AND qa.correct=0) AS wrong_ever,
+               (SELECT COUNT(*) FROM reviews r WHERE r.entry_id=e.id
+                AND r.mode='read') AS read_cnt
         FROM entries e WHERE e.status='final'
         """
     ).fetchall()
@@ -100,7 +102,8 @@ def ensure_today_plan(conn, day: str | None = None) -> dict:
     for r in rows:
         st = scheduler.classify(r["id"], r["subject"], r["submodule"], r["point"],
                                 r["priority"], r["last_ts"], r["last_result"],
-                                bool(r["wrong_ever"]), day)
+                                bool(r["wrong_ever"]), day,
+                                int(r["read_cnt"] or 0))
         if st is not None:
             states.append(st)
 
@@ -161,7 +164,7 @@ def plan_payload(conn, day: str) -> dict:
 
 
 def continue_plan_entries(conn, count: int = 5) -> list[dict]:
-    """看背续学：今日计划之外的候选条目，按 错题>复习>新学 > 优先级 > 科目顺序 取前 N。"""
+    """看背续学：今日计划之外的候选条目，按 错题>复习>新学 > 未看优先 > 优先级 > 科目顺序 取前 N。"""
     day = date.today().isoformat()
     plan = plan_payload(conn, day)
     plan_ids = {it["id"] for it in plan["items"]}
@@ -173,7 +176,9 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
                (SELECT r.result FROM reviews r WHERE r.entry_id=e.id
                 ORDER BY r.ts DESC LIMIT 1) AS last_result,
                EXISTS(SELECT 1 FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id
-                      WHERE q.entry_id=e.id AND qa.correct=0) AS wrong_ever
+                      WHERE q.entry_id=e.id AND qa.correct=0) AS wrong_ever,
+               (SELECT COUNT(*) FROM reviews r WHERE r.entry_id=e.id
+                AND r.mode='read') AS read_cnt
         FROM entries e WHERE e.status='final'
         """
     ).fetchall()
@@ -184,11 +189,13 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
             continue
         st = scheduler.classify(r["id"], r["subject"], r["submodule"], r["point"],
                                 r["priority"], r["last_ts"], r["last_result"],
-                                bool(r["wrong_ever"]), day)
+                                bool(r["wrong_ever"]), day,
+                                int(r["read_cnt"] or 0))
         if st is not None:
             states.append(st)
     states.sort(key=lambda s: (
         bucket_rank[s.bucket],
+        s.read_count,
         scheduler.PRIORITY_ORDER.get(s.priority, 9),
         scheduler.SUBJECT_ORDER.index(s.subject)
         if s.subject in scheduler.SUBJECT_ORDER else len(scheduler.SUBJECT_ORDER),

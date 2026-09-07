@@ -17,6 +17,7 @@ class EntryState:
     point: str
     priority: str
     bucket: str  # retry | review | new
+    read_count: int = 0  # 看背次数（mode='read'），桶内未看优先
 
 
 def next_review_days(result: str) -> int:
@@ -30,20 +31,22 @@ def days_between(a: str, b: str) -> int:
 
 def classify(entry_id: str, subject: str, submodule: str, point: str,
              priority: str, last_review_ts: str | None, last_result: str | None,
-             quiz_wrong_recent: bool, today: str) -> EntryState | None:
+             quiz_wrong_recent: bool, today: str,
+             read_count: int = 0) -> EntryState | None:
     if last_result == "bad" or quiz_wrong_recent:
-        return EntryState(entry_id, subject, submodule, point, priority, "retry")
+        return EntryState(entry_id, subject, submodule, point, priority, "retry", read_count)
     # 听学 exposed 只记暴露不记掌握，视为未学
     if last_review_ts is None or last_result in (None, "exposed"):
-        return EntryState(entry_id, subject, submodule, point, priority, "new")
+        return EntryState(entry_id, subject, submodule, point, priority, "new", read_count)
     if days_between(last_review_ts, today) >= next_review_days(last_result):
-        return EntryState(entry_id, subject, submodule, point, priority, "review")
+        return EntryState(entry_id, subject, submodule, point, priority, "review", read_count)
     return None
 
 
 def _sort_key(st: EntryState):
     subject_rank = SUBJECT_ORDER.index(st.subject) if st.subject in SUBJECT_ORDER else len(SUBJECT_ORDER)
-    return (PRIORITY_ORDER[st.priority], subject_rank, st.entry_id)
+    # 桶内未看优先（与自定义范围对齐：read_count 少优先）→ 优先级 → 科目 → id
+    return (st.read_count, PRIORITY_ORDER[st.priority], subject_rank, st.entry_id)
 
 
 def build_queue(states: list[EntryState], capacity: int,
