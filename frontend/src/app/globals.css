@@ -91,4 +91,4 @@ body {
 .page-box > *:nth-child(n+4) { animation-delay: 0.12s; }
 
 button { font-family: inherit; }
-input { font-family: inherit; }
+input, textarea { font-family: inherit; }

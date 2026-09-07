@@ -41,6 +41,7 @@ export default function ListenView() {
   const prefetchRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const durRef = useRef(0);
+  const playedRef = useRef(0);
   const exposedRef = useRef(false);
 
   useEffect(() => {
@@ -118,7 +119,7 @@ export default function ListenView() {
     }
   }, [queue, idx, customRange]);
 
-  useEffect(() => { durRef.current = 0; exposedRef.current = false; setShowText(false); }, [idx]);
+  useEffect(() => { durRef.current = 0; playedRef.current = 0; exposedRef.current = false; setShowText(false); }, [idx]);
 
   // 预加载：剩 LISTEN_THRESHOLD 条时后台静默续取 LISTEN_PAGE 条（只追加不跳段）
   useEffect(() => {
@@ -292,13 +293,21 @@ export default function ListenView() {
     } catch (e) { setNotice("加载失败：" + String(e)); } finally { setLoadingMore(false); setMoreCount(""); }
   }
 
-  function markExposed() {
-    if (exposedRef.current || durRef.current < 10) return;
+  function markExposed(force = false) {
+    if (exposedRef.current) return;
+    // 短音频（<10s，库内 337 条 / 14.6%）按旧阈值 dur>=10 永不计数。
+    // 新规则：播完即记；中途切歌/暂停则按实际播放位置 >= min(8, duration*0.8) 才记。
+    if (!force) {
+      const dur = durRef.current || 0;
+      const played = playedRef.current || 0;
+      const threshold = dur > 0 ? Math.min(8, dur * 0.8) : 8;
+      if (played < threshold) return;
+    }
     exposedRef.current = true;
     if (!entry.listen_count) setHeardTotal((n) => n + 1);
     setListenedToday((prev) => new Set(prev).add(entry.id));
     setQueue((q) => q ? { ...q, items: q.items.map((it) => it.id === entry.id ? { ...it, listen_count: (it.listen_count || 0) + 1, listened_today: true } as any : it) } : q);
-    void postJson("/api/reviews", { entry_id: entry.id, mode: "listen", result: "exposed", duration_sec: Math.round(durRef.current || 0) });
+    void postJson("/api/reviews", { entry_id: entry.id, mode: "listen", result: "exposed", duration_sec: Math.round(playedRef.current || durRef.current || 0) });
   }
   function next() { markExposed(); if (idx + 1 < items.length) setIdx(idx + 1); else { setIdx(items.length); setPlaying(false); } }
   function prev() { markExposed(); if (idx > 0) setIdx(idx - 1); }
@@ -324,7 +333,7 @@ export default function ListenView() {
         <h2>{entry.subject} · {entry.point}{isMarked && <span className="badge">已标记</span>}{(entry.listened_today || listenedToday.has(entry.id)) && <span className="badge">今日已听</span>}{entry.listen_count ? <span className="badge">已听 {entry.listen_count} 次</span> : <span className="badge">未听</span>}</h2>
         <p className="muted">第 {idx + 1} 段 / 队列 {items.length} · {entry.listen_count ? `本条已听 ${entry.listen_count} 次` : "本条未听"} · 今日累计 {listenedToday.size} 条 · 累计已听 {heardTotal} · 剩余可听 {queue.remaining}{queue.generating ? " · 正在续批生成…" : ""}{prefetching ? " · 后面内容加载中…" : ""}</p>
         <p className="muted" style={{ fontSize: 12 }}>听学只记暴露，不记掌握</p>
-        <audio ref={audioRef} controls autoPlay key={`${entry.id}-${playNonce}`} src={`/api/audio/${entry.id}`} onLoadedMetadata={(e) => { durRef.current = Math.round(e.currentTarget.duration || 0); }} onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); markExposed(); }} onEnded={() => { markExposed(); next(); }} onError={() => setError("音频生成中或不可用，请稍后重试")} />
+        <audio ref={audioRef} controls autoPlay key={`${entry.id}-${playNonce}`} src={`/api/audio/${entry.id}`} onLoadedMetadata={(e) => { durRef.current = Math.round(e.currentTarget.duration || 0); }} onTimeUpdate={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); }} onPlay={() => setPlaying(true)} onPause={(e) => { setPlaying(false); playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); markExposed(); }} onEnded={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || e.currentTarget.duration || 0); markExposed(true); next(); }} onError={() => setError("音频生成中或不可用，请稍后重试")} />
         <div className="row">
           <button className="btn btn-ghost" disabled={idx === 0} onClick={prev}>上一个</button>
           <button className="btn btn-ghost" onClick={toggleMark}>{isMarked ? "已标记 ✓" : "标记"}</button>
