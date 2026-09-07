@@ -325,6 +325,21 @@
 }
 .ai-suggest:active { transform: scale(0.96); border-color: var(--primary); }
 .ai-suggest:disabled { opacity: 0.5; }
+/* 历史问答：展开后与对话区同款气泡 + Markdown 渲染 */
+.ai-history-list {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+  max-height: 300px; overflow-y: auto; overscroll-behavior: contain;
+  padding-right: 2px;
+}
+.ai-history-item {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px; border-radius: 14px; font-size: 13px; line-height: 1.7;
+  background: var(--glass-soft); border: 1px solid var(--glass-border);
+}
+.ai-history-item p { margin: 0; }
+.ai-history-item .chat-bubble { font-size: 13px; }
+.ai-history-preview { color: var(--muted); }
+.ai-history-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .chat-msg { display: flex; }
 .chat-msg.user { justify-content: flex-end; }
 .chat-bubble {

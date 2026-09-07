@@ -49,6 +49,7 @@ export default function AiChat({
   const [description, setDescription] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [tip, setTip] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -123,6 +124,15 @@ export default function AiChat({
     getJson<{ items: HistoryItem[] }>(
       `/api/assistant/history?entry_id=${encodeURIComponent(entryId)}&limit=20`
     ).then((d) => setHistory(d.items)).catch(() => {});
+  }
+
+  function toggleExpanded(id: number) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function appendToInput(text: string) {
@@ -241,17 +251,52 @@ export default function AiChat({
             {showHistory ? "收起历史问答" : `历史问答（${history.length}）`}
           </button>
           {showHistory && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-              {history.map((h) => (
-                <div key={h.id} className="analysis" style={{ marginTop: 0 }}>
-                  <p className="muted" style={{ fontSize: 12 }}>{h.ts.slice(0, 16).replace("T", " ")}</p>
-                  <p style={{ fontWeight: 600 }}>问：{h.question}</p>
-                  <p className="muted">答：{h.answer.slice(0, 120)}{h.answer.length > 120 ? "…" : ""}</p>
-                  <button className="badge-btn" onClick={() => { setInput(h.question); setShowHistory(false); requestAnimationFrame(() => { autosize(); taRef.current?.focus(); }); }}>
-                    回填这个问题
-                  </button>
-                </div>
-              ))}
+            <div className="ai-history-list">
+              {history.map((h) => {
+                const expanded = expandedIds.has(h.id);
+                const preview = h.answer.replace(/\s+/g, " ").slice(0, 120);
+                return (
+                  <div key={h.id} className="ai-history-item">
+                    <p className="muted" style={{ fontSize: 12, margin: 0 }}>{h.ts.slice(0, 16).replace("T", " ")}</p>
+                    {/* 提问：与对话区用户气泡同款 */}
+                    <div className="chat-msg user" style={{ flexDirection: "column", alignItems: "flex-end" }}>
+                      <div className="chat-bubble">{h.question}</div>
+                    </div>
+                    {expanded ? (
+                      <>
+                        {/* 回答：与对话区 AI 气泡同款 Markdown 渲染 */}
+                        <div className="chat-msg ai" style={{ flexDirection: "column", alignItems: "flex-start" }}>
+                          <div
+                            className="chat-bubble ai-md"
+                            style={{ maxWidth: "100%" }}
+                            dangerouslySetInnerHTML={{ __html: mdToHtml(h.answer) }}
+                          />
+                          <button className="badge-btn" style={{ marginTop: 4 }} onClick={() => void handleCopy(h.answer, "回答")}>
+                            复制回答
+                          </button>
+                        </div>
+                        {h.related_entry_ids?.length > 0 && (
+                          <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+                            引用条目：{h.related_entry_ids.join(" · ")}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="muted ai-history-preview">
+                        答：{preview}{h.answer.length > 120 ? "…" : ""}
+                      </p>
+                    )}
+                    <div className="ai-history-actions">
+                      <button className="badge-btn" onClick={() => toggleExpanded(h.id)}>
+                        {expanded ? "收起全文" : "展开全文"}
+                      </button>
+                      <button className="badge-btn" onClick={() => { setInput(h.question); setShowHistory(false); requestAnimationFrame(() => { autosize(); taRef.current?.focus(); }); }}>
+                        回填这个问题
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
