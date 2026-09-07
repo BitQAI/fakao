@@ -51,7 +51,33 @@ export default function AiChat({
   const [showHistory, setShowHistory] = useState(false);
   const [tip, setTip] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
   const entryId = prefill?.entry_id ?? "";
+  const MAX_INPUT_H = 132;
+
+  function autosize() {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const h = Math.min(el.scrollHeight, MAX_INPUT_H);
+    el.style.height = `${h}px`;
+    el.style.overflowY = el.scrollHeight > MAX_INPUT_H ? "auto" : "hidden";
+  }
+
+  useEffect(() => {
+    autosize();
+  }, [input, open]);
+
+  useEffect(() => {
+    if (open) {
+      // 面板弹出后重置高度并聚焦（桌面端直接聚焦，移动端避免强制弹键盘则仅重置）
+      autosize();
+      const t = window.setTimeout(() => {
+        if (window.matchMedia?.("(pointer: fine)").matches) taRef.current?.focus();
+      }, 60);
+      return () => window.clearTimeout(t);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (prefill) {
@@ -102,6 +128,10 @@ export default function AiChat({
   function appendToInput(text: string) {
     if (!text) return;
     setInput((prev) => (prev ? `${prev}\n${text}` : text));
+    requestAnimationFrame(() => {
+      autosize();
+      taRef.current?.focus();
+    });
   }
 
   async function handleCopy(text: string, label: string) {
@@ -165,11 +195,21 @@ export default function AiChat({
   }
 
   if (!open) return null;
+  const canSend = !busy && input.trim().length > 0;
+  const suggestions = entryId
+    ? ["一句话讲清这个考点", "举一个真题例子", "有哪些易混淆点？"]
+    : ["今天先背哪 20 条最高效？", "商经公司法怎么记？", "刑法因果关系怎么判断？"];
   return (
     <div className="ai-chat">
       <div className="ai-chat-head">
-        <b>AI 助手</b>
-        <button onClick={onClose}>×</button>
+        <div className="ai-head-info">
+          <span className="ai-dot" />
+          <div className="ai-head-text">
+            <b>AI 助手</b>
+            <span>结合条目出处作答</span>
+          </div>
+        </div>
+        <button onClick={onClose} aria-label="关闭">×</button>
       </div>
       {(title || description) ? (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "8px 12px 0" }}>
@@ -207,7 +247,7 @@ export default function AiChat({
                   <p className="muted" style={{ fontSize: 12 }}>{h.ts.slice(0, 16).replace("T", " ")}</p>
                   <p style={{ fontWeight: 600 }}>问：{h.question}</p>
                   <p className="muted">答：{h.answer.slice(0, 120)}{h.answer.length > 120 ? "…" : ""}</p>
-                  <button className="badge-btn" onClick={() => { setInput(h.question); setShowHistory(false); }}>
+                  <button className="badge-btn" onClick={() => { setInput(h.question); setShowHistory(false); requestAnimationFrame(() => { autosize(); taRef.current?.focus(); }); }}>
                     回填这个问题
                   </button>
                 </div>
@@ -217,16 +257,39 @@ export default function AiChat({
         </div>
       )}
       <div className="ai-chat-body">
-        {messages.length === 0 && <p className="muted">随时提问，答案会引用条目出处。</p>}
+        {messages.length === 0 && (
+          <div className="ai-empty">
+            <div className="ai-empty-icon">✦</div>
+            <p>随时提问，答案会引用条目出处。</p>
+            <div className="ai-suggests">
+              {suggestions.map((s) => (
+                <button
+                  key={s}
+                  className="ai-suggest"
+                  disabled={busy}
+                  onClick={() => void ask(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {messages.map((m, i) => (
           <div key={i} className={`chat-msg ${m.role}`} style={{ flexDirection: "column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
             {m.role === "ai" ? (
               <>
-                <div
-                  className="chat-bubble"
-                  style={{ maxWidth: "100%" }}
-                  dangerouslySetInnerHTML={{ __html: mdToHtml(m.text || "…") }}
-                />
+                {m.text ? (
+                  <div
+                    className={`chat-bubble ai-md${busy && i === messages.length - 1 ? " streaming" : ""}`}
+                    style={{ maxWidth: "100%" }}
+                    dangerouslySetInnerHTML={{ __html: mdToHtml(m.text) }}
+                  />
+                ) : (
+                  <div className="chat-bubble ai-typing" style={{ maxWidth: "100%" }}>
+                    <span /><span /><span />
+                  </div>
+                )}
                 {m.text && (
                   <button className="badge-btn" style={{ marginTop: 4 }} onClick={() => void handleCopy(m.text, "回答")}>
                     复制回答
@@ -244,13 +307,46 @@ export default function AiChat({
         className="ai-chat-input"
         onSubmit={(e) => { e.preventDefault(); void ask(input); }}
       >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="输入问题…"
-          disabled={busy}
-        />
-        <button type="submit" disabled={busy}>发送</button>
+        <div className="ai-composer">
+          {input && !busy && (
+            <button
+              type="button"
+              className="ai-clear"
+              aria-label="清空输入"
+              onClick={() => {
+                setInput("");
+                requestAnimationFrame(() => {
+                  autosize();
+                  taRef.current?.focus();
+                });
+              }}
+            >
+              ×
+            </button>
+          )}
+          <textarea
+            ref={taRef}
+            value={input}
+            rows={1}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void ask(input);
+              }
+            }}
+            placeholder="输入问题，Enter 发送…"
+            disabled={busy}
+            aria-label="输入问题"
+          />
+          <button type="submit" className="ai-send" disabled={!canSend} aria-label="发送">
+            {busy ? <span className="ai-spinner" /> : <span className="ai-arrow">↑</span>}
+          </button>
+        </div>
+        <div className="ai-input-meta">
+          <span>Enter 发送 · Shift+Enter 换行</span>
+          {input.length > 0 && <span>{input.length} 字</span>}
+        </div>
       </form>
     </div>
   );

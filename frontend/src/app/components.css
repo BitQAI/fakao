@@ -293,8 +293,38 @@
   border-bottom: 1px solid var(--glass-border);
   border-radius: 22px 22px 0 0;
 }
-.ai-chat-head button { border: 0; background: transparent; font-size: 22px; cursor: pointer; color: var(--muted); }
-.ai-chat-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.ai-chat-head button { border: 0; background: transparent; font-size: 22px; cursor: pointer; color: var(--muted); width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.ai-chat-head button:active { background: var(--glass-soft); }
+.ai-head-info { display: flex; align-items: center; gap: 10px; }
+.ai-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex: none;
+  background: linear-gradient(135deg, var(--good), #34d399);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
+}
+.ai-head-text { display: flex; flex-direction: column; line-height: 1.3; }
+.ai-head-text b { font-size: 15px; }
+.ai-head-text span { font-size: 12px; color: var(--muted); }
+.ai-chat-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain; }
+/* 空态 */
+.ai-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 8px; padding: 26px 12px 10px;
+}
+.ai-empty-icon {
+  width: 44px; height: 44px; border-radius: 16px; display: flex;
+  align-items: center; justify-content: center; font-size: 22px; color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  box-shadow: 0 8px 22px rgba(67, 56, 202, 0.35);
+}
+.ai-empty p { margin: 4px 0 6px; color: var(--muted); font-size: 13px; }
+.ai-suggests { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.ai-suggest {
+  font-size: 13px; padding: 8px 13px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  color: var(--ink); transition: transform 0.15s var(--ease), border-color 0.15s;
+}
+.ai-suggest:active { transform: scale(0.96); border-color: var(--primary); }
+.ai-suggest:disabled { opacity: 0.5; }
 .chat-msg { display: flex; }
 .chat-msg.user { justify-content: flex-end; }
 .chat-bubble {
@@ -307,24 +337,86 @@
 .chat-msg.user .chat-bubble {
   background: linear-gradient(135deg, var(--primary), var(--primary-2));
   color: #fff; border: 0;
+  word-break: break-word;
 }
+.chat-msg .chat-bubble.ai-md { white-space: normal; }
+.chat-msg .chat-bubble.ai-md p { margin: 0 0 6px; }
+.chat-msg .chat-bubble.ai-md p:last-child { margin-bottom: 0; }
+.chat-msg .chat-bubble.ai-md ul, .chat-msg .chat-bubble.ai-md ol { margin: 6px 0; padding-left: 20px; }
+.chat-msg .chat-bubble.ai-md li { margin: 2px 0; }
+.chat-msg .chat-bubble.ai-md code {
+  background: rgba(16, 24, 40, 0.06); border-radius: 6px; padding: 1px 5px; font-size: 13px;
+}
+.chat-msg .chat-bubble.ai-md table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+.chat-msg .chat-bubble.ai-md th, .chat-msg .chat-bubble.ai-md td {
+  border: 1px solid var(--line); padding: 6px 8px; text-align: left;
+}
+.chat-msg .chat-bubble.ai-md blockquote {
+  margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--primary);
+  background: rgba(37, 99, 235, 0.07); border-radius: 0 10px 10px 0; color: inherit;
+}
+/* 流式输出光标 */
+.chat-bubble.streaming::after { content: "▍"; color: var(--primary); animation: blink 0.9s infinite; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+/* 思考中三点 */
+.ai-typing { display: inline-flex; gap: 5px; align-items: center; padding: 13px 16px !important; }
+.ai-typing span {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
+  animation: typing 1.1s infinite var(--ease);
+}
+.ai-typing span:nth-child(2) { animation-delay: 0.18s; }
+.ai-typing span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes typing { 0%, 60%, 100% { opacity: 0.25; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
 .ai-chat-input {
-  display: flex; gap: 10px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 0;
   background: transparent;
   border-top: 1px solid var(--glass-border);
   border-radius: 0 0 22px 22px;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }
-.ai-chat-input input {
-  flex: 1; border: 1px solid var(--glass-border); border-radius: 14px;
-  padding: 11px 14px; font-size: 15px; background: var(--glass-soft);
-  color: var(--ink); outline: none;
+/* 自适应输入框：随文字上下延展 */
+.ai-composer {
+  display: flex; align-items: flex-end; gap: 8px;
+  border: 1px solid var(--glass-border); border-radius: 18px;
+  background: var(--glass-soft); padding: 8px 8px 8px 14px;
+  transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease);
 }
-.ai-chat-input input:focus { border-color: var(--primary); }
-.ai-chat-input button {
-  border: 0; border-radius: 14px; padding: 0 18px;
+.ai-composer:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+.ai-composer textarea {
+  flex: 1; min-width: 0; border: 0; background: transparent;
+  padding: 8px 0; font-size: 16px; line-height: 1.6; color: var(--ink);
+  outline: none; resize: none; height: 40px; max-height: 132px;
+  font-family: inherit;
+}
+.ai-composer textarea::placeholder { color: var(--muted); }
+.ai-composer textarea:disabled { opacity: 0.6; }
+.ai-clear {
+  flex: none; align-self: flex-start; margin-top: 6px;
+  width: 22px; height: 22px; border-radius: 50%; border: 0; cursor: pointer;
+  background: rgba(16, 24, 40, 0.08); color: var(--muted); font-size: 14px; line-height: 1;
+}
+.ai-send {
+  flex: none; width: 38px; height: 38px; border-radius: 50%; border: 0; cursor: pointer;
   background: linear-gradient(135deg, var(--primary), var(--primary-2));
-  color: #fff; font-size: 14px; cursor: pointer;
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 6px 16px rgba(67, 56, 202, 0.35);
+  transition: transform 0.15s var(--ease), opacity 0.15s, filter 0.15s;
+}
+.ai-send:active:not(:disabled) { transform: scale(0.92); }
+.ai-send:disabled { opacity: 0.4; box-shadow: none; cursor: default; filter: grayscale(0.3); }
+.ai-arrow { font-size: 18px; font-weight: 700; line-height: 1; transform: translateY(-1px); }
+.ai-spinner {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4); border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.ai-input-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; color: var(--muted); padding: 0 4px;
 }
 
 /* 覆盖树 */
