@@ -264,8 +264,13 @@
   color: #fff; box-shadow: 0 10px 26px rgba(67, 56, 202, 0.4);
   cursor: pointer; z-index: 40; display: flex; align-items: center;
   justify-content: center; transition: transform 0.2s var(--ease);
+  touch-action: none; /* 长按拖动：接管触摸，避免与页面滚动冲突 */
 }
 .ai-fab:active { transform: scale(0.94); }
+.ai-fab.dragging {
+  transform: scale(1.12); cursor: grabbing;
+  box-shadow: 0 14px 34px rgba(67, 56, 202, 0.55);
+}
 .ai-fab svg { width: 24px; height: 24px; }
 .ai-fab-x { font-size: 26px; line-height: 1; font-weight: 300; }
 /* 悬浮助手面板：非全屏，悬于悬浮球之上，玻璃态 */

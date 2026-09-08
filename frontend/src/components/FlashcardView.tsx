@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { getJson, postJson, putJson } from "@/lib/api";
-import { readSavedQueue, writeSavedQueue } from "@/lib/progressStore";
-import type { Entry, Plan } from "@/lib/types";
+import { delJson, getJson, postJson, putJson } from "@/lib/api";
+import { readMarked, readSavedQueue, writeMarked, writeSavedQueue } from "@/lib/progressStore";
+import type { Entry, MarkItem, Plan } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
+import { ListenMarksPanel } from "./ListenMarksPanel";
 
 const READ_STORE_KEY = "fakao.read.queue.v1";
 
@@ -31,6 +32,8 @@ export default function FlashcardView() {
   const [statute, setStatute] = useState<string | null>(null);
   const [aiCount, setAiCount] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
+  const [marksOpen, setMarksOpen] = useState(false);
+  const [marked, setMarked] = useState<MarkItem[]>([]);
   const [fPoint, setFPoint] = useState("");
   const [fAnchor, setFAnchor] = useState("");
   const [fConclusion, setFConclusion] = useState("");
@@ -122,6 +125,22 @@ export default function FlashcardView() {
     }).catch(() => { if (!cancelled) setAiCount(null); });
     return () => { cancelled = true; };
   }, [currentId]);
+
+  // 标记：与听学共用 /api/marks（含本地旧标记迁移）
+  useEffect(() => {
+    getJson<{ items: MarkItem[] }>("/api/marks").then(async (d) => {
+      setMarked(d.items);
+      const legacy = readMarked();
+      const existing = new Set(d.items.map((m) => m.entry_id));
+      const pending = legacy.filter((m) => !existing.has(m.id));
+      if (pending.length) {
+        for (const m of pending) try { await postJson("/api/marks", { entry_id: m.id }); } catch {}
+        writeMarked([]);
+        const fresh = await getJson<{ items: MarkItem[] }>("/api/marks");
+        setMarked(fresh.items);
+      }
+    }).catch(() => {});
+  }, []);
 
   // AI 问答成功后刷新徽标（AiChat 通过 ai-asked 事件通知）
   useEffect(() => {
@@ -312,6 +331,68 @@ export default function FlashcardView() {
     }
   }
 
+  const isMarked = marked.some((m) => m.entry_id === entry.id);
+  async function toggleMark() {
+    if (isMarked) {
+      const m = marked.find((x) => x.entry_id === entry.id);
+      if (!m) return;
+      try {
+        await delJson(`/api/marks/${m.id}`);
+        setMarked((p) => p.filter((x) => x.id !== m.id));
+      } catch (e) {
+        setNotice("取消失败：" + String(e));
+      }
+    } else {
+      try {
+        await postJson("/api/marks", { entry_id: entry.id });
+        const fresh = await getJson<{ items: MarkItem[] }>("/api/marks");
+        setMarked(fresh.items);
+      } catch (e) {
+        setNotice("标记失败：" + String(e));
+      }
+    }
+  }
+  async function removeMark(m: MarkItem) {
+    try {
+      await delJson(`/api/marks/${m.id}`);
+      setMarked((p) => p.filter((x) => x.id !== m.id));
+    } catch (e) {
+      setNotice("取消失败：" + String(e));
+    }
+  }
+  async function clearMarks() {
+    try {
+      await delJson("/api/marks");
+      setMarked([]);
+    } catch (e) {
+      setNotice("清空失败：" + String(e));
+    }
+  }
+  // 重背：队列内直接跳卡，不在队列则取回置首
+  async function replayMarked(m: MarkItem) {
+    setNotice("");
+    if (!plan) return;
+    const inIdx = plan.items.findIndex((i) => i.id === m.entry_id);
+    if (inIdx >= 0) {
+      setFlipped(false);
+      setIndex(inIdx);
+    } else {
+      try {
+        const e = await getJson<Entry>(`/api/entries/${encodeURIComponent(m.entry_id)}`);
+        setPlan((p) => (p ? { ...p, items: [e, ...p.items.filter((i) => i.id !== e.id)] } : p));
+        setFlipped(false);
+        setIndex(0);
+      } catch {
+        setNotice("重背失败：条目不存在或已下架。");
+        return;
+      }
+    }
+    setMarksOpen(false);
+  }
+  function viewMarked(m: MarkItem) {
+    window.location.href = `/study?view=read&entry=${encodeURIComponent(m.entry_id)}`;
+  }
+
   function askAi() {
     window.dispatchEvent(new CustomEvent("ask-ai", {
       detail: {
@@ -363,6 +444,9 @@ export default function FlashcardView() {
             重新选择
           </button>
         )}
+        <button className="btn btn-ghost mode-btn" onClick={() => setMarksOpen(true)}>
+          已标记（{marked.length}）
+        </button>
       </div>
       {notice && <p className="muted">{notice}</p>}
       <p className="muted">
@@ -375,6 +459,9 @@ export default function FlashcardView() {
             <span className="tag">{entry.subject} · {entry.submodule}</span>
             <h2>
               {entry.point}
+              {isMarked && (
+                <span className="badge">已标记</span>
+              )}
               {(entry.reviewed_today || reviewedToday.has(entry.id)) && (
                 <span className="badge">今日已看</span>
               )}
@@ -425,6 +512,9 @@ export default function FlashcardView() {
             )}
             <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); askAi(); }}>
               问 AI{aiCount ? ` · ${aiCount}条历史` : ""}
+            </button>
+            <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); void toggleMark(); }}>
+              {isMarked ? "已标记 ✓" : "标记"}
             </button>
             <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); openEdit(); }}>
               编辑
@@ -511,6 +601,20 @@ export default function FlashcardView() {
         statute={statute}
         onClose={() => { setSource(null); setStatute(null); }}
       />
+      {marksOpen && (
+        <div className="source-modal" onClick={() => setMarksOpen(false)}>
+          <div className="source-panel" onClick={(e) => e.stopPropagation()}>
+            <ListenMarksPanel
+              marked={marked}
+              onClose={() => setMarksOpen(false)}
+              onRemove={(m) => void removeMark(m)}
+              onReplay={(m) => void replayMarked(m)}
+              onView={viewMarked}
+              onClear={() => void clearMarks()}
+            />
+          </div>
+        </div>
+      )}
       <CustomRangePicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}

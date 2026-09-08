@@ -24,7 +24,7 @@ export function ListenMarksPanel({
       </div>
       <div className="source-body">
         {marked.length === 0 ? (
-          <p className="muted">暂无标记。听学时点「标记」收藏想重背的条目。</p>
+          <p className="muted">暂无标记。看背或听学时点「标记」收藏想重背的条目。</p>
         ) : (
           <div className="history-list">
             {marked.map((m) => (
