@@ -22,23 +22,39 @@ def entry_state(last_result: str | None, review_count: int,
     return "learned"
 
 
-def _merge(target: dict, state: str) -> None:
+def _merge(target: dict, state: str, unread: bool = False,
+           unlistened: bool = False) -> None:
     target["count"] += 1
     target["states"][state] = target["states"].get(state, 0) + 1
+    if unread:
+        target["unread"] += 1
+    if unlistened:
+        target["unlistened"] += 1
 
 
 def coverage_tree(entries: list[dict]) -> dict:
     tree = {}
     for e in entries:
+        unread = bool(e.get("unread", False))
+        unlistened = bool(e.get("unlistened", False))
         subject = tree.setdefault(
             e["subject"],
-            {"count": 0, "states": {}, "submodules": {}},
+            {"count": 0, "states": {}, "unread": 0, "unlistened": 0,
+             "submodules": {}},
         )
         sub = subject["submodules"].setdefault(
             e["submodule"],
-            {"count": 0, "states": {}, "points": {}},
+            {"count": 0, "states": {}, "unread": 0, "unlistened": 0,
+             "points": {}},
         )
-        _merge(subject, e["state"])
-        _merge(sub, e["state"])
-        sub["points"][e["point"]] = e["state"]
+        _merge(subject, e["state"], unread, unlistened)
+        _merge(sub, e["state"], unread, unlistened)
+        # 同一子模块下 point 名可能重复：state 取最后一条，计数累加
+        pt = sub["points"].setdefault(
+            e["point"], {"state": e["state"], "unread": 0, "unlistened": 0})
+        pt["state"] = e["state"]
+        if unread:
+            pt["unread"] += 1
+        if unlistened:
+            pt["unlistened"] += 1
     return tree

@@ -60,7 +60,10 @@ def test_record_review_and_coverage(tmp_db):
     tree = stats.coverage_payload(conn)
     point_state = tree["刑法"]["submodules"]["分则-财产犯罪"]["points"]["考点1"]
     # 两次复习且末次 good → coverage.entry_state 返回 mastered（与 coverage spec 一致）
-    assert point_state == "mastered"
+    assert point_state["state"] == "mastered"
+    # 看过但没听过：未看 0、未听 1
+    assert point_state["unread"] == 0
+    assert point_state["unlistened"] == 1
 
 
 def test_build_daily_quiz_falls_back_to_cloze(tmp_db):
@@ -119,12 +122,15 @@ def test_coverage_quiz_wrong_is_weak(tmp_db):
     quiz_service.record_quiz_answer(conn, questions[0]["id"], "错答", False)
     tree = stats.coverage_payload(conn)
     first_point = tree["刑法"]["submodules"]["分则-财产犯罪"]["points"]["考点1"]
-    assert first_point == "weak"
+    assert first_point["state"] == "weak"
     # 纯听学（exposed）视为已学而非未学
     service.record_review(conn, "XF-002", "listen", "exposed", 30)
     tree = stats.coverage_payload(conn)
     second_point = tree["刑法"]["submodules"]["分则-财产犯罪"]["points"]["考点2"]
-    assert second_point == "learned"
+    assert second_point["state"] == "learned"
+    # 只听未看：未看 1、未听 0
+    assert second_point["unread"] == 1
+    assert second_point["unlistened"] == 0
 
 
 def test_settings_and_days_left(tmp_db):

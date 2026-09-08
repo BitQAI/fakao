@@ -40,8 +40,8 @@ export default function CoverageTree({ tree }: { tree: Tree }) {
                   </button>
                   {open[sub] && (
                     <div className="tree-points">
-                      {Object.entries(subdata.points).map(([point, state]) => (
-                        <span key={point} className="tree-point" style={{ color: STATE_COLOR[state] }}>
+                      {Object.entries(subdata.points).map(([point, pt]) => (
+                        <span key={point} className="tree-point" style={{ color: STATE_COLOR[pt.state] }}>
                           {point}
                         </span>
                       ))}

@@ -14,17 +14,27 @@ def test_entry_state():
 
 def test_coverage_tree_aggregates():
     entries = [
-        {"subject": "民法", "submodule": "合同", "point": "合同效力", "state": "new"},
-        {"subject": "民法", "submodule": "合同", "point": "代位权", "state": "learned"},
-        {"subject": "民法", "submodule": "物权", "point": "善意取得", "state": "weak"},
+        {"subject": "民法", "submodule": "合同", "point": "合同效力",
+         "state": "new", "unread": True, "unlistened": True},
+        {"subject": "民法", "submodule": "合同", "point": "代位权",
+         "state": "learned", "unread": False, "unlistened": True},
+        {"subject": "民法", "submodule": "物权", "point": "善意取得",
+         "state": "weak", "unread": False, "unlistened": False},
     ]
     tree = C.coverage_tree(entries)
     minfa = tree["民法"]
     assert minfa["count"] == 3
     assert minfa["states"] == {"new": 1, "learned": 1, "weak": 1}
+    assert minfa["unread"] == 1
+    assert minfa["unlistened"] == 2
     hetong = minfa["submodules"]["合同"]
-    assert hetong["points"] == {"合同效力": "new", "代位权": "learned"}
+    assert hetong["points"] == {
+        "合同效力": {"state": "new", "unread": 1, "unlistened": 1},
+        "代位权": {"state": "learned", "unread": 0, "unlistened": 1},
+    }
     assert hetong["count"] == 2
+    assert hetong["unread"] == 1
+    assert hetong["unlistened"] == 2
 
 
 def test_coverage_tree_empty():

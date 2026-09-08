@@ -172,13 +172,23 @@ export interface QuizHistoryItem {
   analysis: string;
 }
 
+export interface CoveragePoint {
+  state: string;
+  unread: number;
+  unlistened: number;
+}
+
 export interface CoverageNode {
   count: number;
   states: Record<string, number>;
+  unread: number;
+  unlistened: number;
   submodules: Record<string, {
     count: number;
     states: Record<string, number>;
-    points: Record<string, string>;
+    unread: number;
+    unlistened: number;
+    points: Record<string, CoveragePoint>;
   }>;
 }
 

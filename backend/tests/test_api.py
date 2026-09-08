@@ -82,7 +82,7 @@ def test_review_then_coverage(client):
     }).json() == {"ok": True}
     tree = client.get("/api/coverage").json()
     state = tree["刑法"]["submodules"]["分则-财产犯罪"]["points"]["转化型抢劫"]
-    assert state == "weak"
+    assert state["state"] == "weak"
 
 
 def test_review_bad_result_rejected(client):

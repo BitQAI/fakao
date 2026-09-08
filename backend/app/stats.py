@@ -27,6 +27,10 @@ def coverage_payload(conn) -> dict:
         " ORDER BY r.ts DESC LIMIT 1) AS last_result, "
         "(SELECT COUNT(*) FROM reviews r WHERE r.entry_id=e.id "
         " AND r.mode='read') AS read_count, "
+        "NOT EXISTS(SELECT 1 FROM reviews r WHERE r.entry_id=e.id "
+        " AND r.mode='read') AS unread, "
+        "NOT EXISTS(SELECT 1 FROM reviews r WHERE r.entry_id=e.id "
+        " AND r.mode='listen') AS unlistened, "
         "EXISTS(SELECT 1 FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id "
         " WHERE q.entry_id=e.id AND qa.correct=0) AS quiz_wrong, "
         "EXISTS(SELECT 1 FROM reviews r WHERE r.entry_id=e.id) "
@@ -36,7 +40,8 @@ def coverage_payload(conn) -> dict:
     ).fetchall()
     items = [
         {"subject": r["subject"], "submodule": r["submodule"],
-         "point": r["point"],
+         "point": r["point"], "unread": bool(r["unread"]),
+         "unlistened": bool(r["unlistened"]),
          "state": cov.entry_state(r["last_result"], r["read_count"],
                                   bool(r["quiz_wrong"]), bool(r["has_record"]))}
         for r in rows
