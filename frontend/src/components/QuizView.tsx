@@ -16,31 +16,36 @@ export default function QuizView() {
   const [result, setResult] = useState<AnswerResult | null>(null);
   const [showAnswer, setShowAnswer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [start, setStart] = useState(Date.now());
   const [error, setError] = useState("");
   const [resultMap, setResultMap] = useState<Record<number, AnswerResult>>({});
   const [pickMap, setPickMap] = useState<Record<number, string[]>>({});
   const [showAnswerMap, setShowAnswerMap] = useState<Record<number, boolean>>({});
 
-  useEffect(() => {
-    getJson<{ questions: QuizQuestion[] }>("/api/quiz/today")
-      .then((d) => { setQuestions(d.questions); setStart(Date.now()); })
-      .catch((e) => setError(String(e)));
-  }, []);
+  // 今日自测不自动出题：进 tab 只展示开始卡片，用户点击后才请求后端生成
+  function loadToday(regenerate = false) {
+    if (loading) return;
+    setLoading(true);
+    setError("");
+    if (regenerate) {
+      setQuestions(null);
+      setIdx(0);
+      setPicked([]);
+      setResult(null);
+      setShowAnswer(false);
+      setResultMap({});
+      setPickMap({});
+      setShowAnswerMap({});
+    }
+    getJson<{ questions: QuizQuestion[] }>(`/api/quiz/today${regenerate ? "?regenerate=1" : ""}`)
+      .then((d) => { setQuestions(d.questions); setStart(Date.now()); setIdx(0); })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }
   const handleRegenerate = () => {
     if (!confirm("重新生成将清空今日题目并重建，确定？")) return;
-    setQuestions(null);
-    setIdx(0);
-    setPicked([]);
-    setResult(null);
-    setShowAnswer(false);
-    setResultMap({});
-    setPickMap({});
-    setShowAnswerMap({});
-    setError("");
-    getJson<{ questions: QuizQuestion[] }>("/api/quiz/today?regenerate=1")
-      .then((d) => { setQuestions(d.questions); setStart(Date.now()); setIdx(0); })
-      .catch((e) => setError(String(e)));
+    loadToday(true);
   };
 
   useEffect(() => {
@@ -64,8 +69,21 @@ export default function QuizView() {
 
   if (view === "today" && !questions) {
     return (
-      <div className="card center">
-        <h2>今日自测生成中…</h2>
+      <div>
+        <QuizSegments view={view} setView={setView} />
+        <div className="card center">
+          <h2>今日自测</h2>
+          <p className="muted">点击开始后才出题，不会自动生成。</p>
+          <div className="row">
+            <button
+              className="btn btn-primary"
+              disabled={loading}
+              onClick={() => loadToday(false)}
+            >
+              {loading ? "出题中…" : "开始出题"}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

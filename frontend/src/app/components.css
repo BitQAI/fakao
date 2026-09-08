@@ -227,6 +227,9 @@
   border-radius: 999px; background: var(--glass-soft); color: var(--muted);
 }
 .pick-state.st-weak { background: rgba(239, 68, 68, 0.12); color: var(--bad); }
+.pick-state.st-unread { background: rgba(37, 99, 235, 0.10); color: var(--primary); }
+.pick-state.st-unlistened { background: rgba(124, 58, 237, 0.12); color: var(--primary-2); }
+.pick-badges { display: inline-flex; gap: 6px; margin-left: 6px; vertical-align: middle; }
 .pick-state.st-learned, .pick-state.st-mastered {
   background: rgba(16, 185, 129, 0.12); color: var(--good);
 }

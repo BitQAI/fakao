@@ -42,6 +42,17 @@ function stateLabel(st: string) {
   return "已学";
 }
 
+// 未看 / 未听标识：有数才显示，避免全学完时视觉噪音
+function UnBadges({ unread, unlistened }: { unread: number; unlistened: number }) {
+  if (!unread && !unlistened) return null;
+  return (
+    <span className="pick-badges">
+      {unread > 0 && <span className="pick-state st-unread">未看 {unread}</span>}
+      {unlistened > 0 && <span className="pick-state st-unlistened">未听 {unlistened}</span>}
+    </span>
+  );
+}
+
 export default function CustomRangePicker({
   open, onClose, onConfirm,
 }: {
@@ -181,6 +192,7 @@ export default function CustomRangePicker({
                     <span className="pick-item-name">{name}</span>
                     <span className="muted">
                       {tree[name].count} 条 · 已学 {sc.learned} · 未学 {sc.unlearned}
+                      <UnBadges unread={tree[name].unread ?? 0} unlistened={tree[name].unlistened ?? 0} />
                     </span>
                   </label>
                 );
@@ -206,6 +218,7 @@ export default function CustomRangePicker({
                         {expanded.has(subject) ? "▾" : "▸"} {subject}
                         <span className="muted">
                           （{tree[subject].count} 条 · 已学 {sCounts.learned} · 未学 {sCounts.unlearned}）
+                          <UnBadges unread={tree[subject].unread ?? 0} unlistened={tree[subject].unlistened ?? 0} />
                         </span>
                       </button>
                     </div>
@@ -225,11 +238,12 @@ export default function CustomRangePicker({
                               />
                               <span className="pick-sub-name">
                                 {sub}（{sd.count} · 已学 {subCounts.learned} · 未学 {subCounts.unlearned}）
+                                <UnBadges unread={sd.unread ?? 0} unlistened={sd.unlistened ?? 0} />
                               </span>
                             </div>
                             <div className="pick-points">
                               {pNames.map((p) => {
-                                const st = sd.points[p];
+                                const pt = sd.points[p];
                                 return (
                                   <label key={p} className="pick-point">
                                     <input
@@ -238,7 +252,9 @@ export default function CustomRangePicker({
                                       onChange={() => togglePoint(p)}
                                     />
                                     <span className="pick-point-name">{p}</span>
-                                    <span className={`pick-state st-${st}`}>{stateLabel(st)}</span>
+                                    <span className={`pick-state st-${pt.state}`}>{stateLabel(pt.state)}</span>
+                                    {pt.unread > 0 && <span className="pick-state st-unread">未看</span>}
+                                    {pt.unlistened > 0 && <span className="pick-state st-unlistened">未听</span>}
                                   </label>
                                 );
                               })}
