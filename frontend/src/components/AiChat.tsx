@@ -54,8 +54,14 @@ export default function AiChat({
   const [tip, setTip] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const entryId = prefill?.entry_id ?? "";
   const MAX_INPUT_H = 132;
+
+  function stopStream() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }
 
   function autosize() {
     const el = taRef.current;
@@ -82,8 +88,19 @@ export default function AiChat({
   }, [open]);
 
   useEffect(() => {
+    if (!open) {
+      // 关闭面板即结束本轮会话：中断流式输出并清空对话，
+      // 下次打开（即使已切到新题）不再残留上题内容
+      stopStream();
+      setMessages([]);
+    }
+  }, [open]);
+
+  useEffect(() => {
     if (prefill) {
-      setInput(prefill.question);
+      // 切到新题：中断上一题未完成的流式输出（防止旧内容续写进新会话），清空输入与对话
+      stopStream();
+      setInput("");
       setMessages([]);
       setShowHistory(false);
       setTip("");
@@ -157,6 +174,8 @@ export default function AiChat({
     setInput("");
     setBusy(true);
     setMessages((m) => [...m, { role: "ai", text: "" }]);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     let gotAnswer = false;
     try {
       const res = await fetch("/api/assistant/ask", {
@@ -166,6 +185,7 @@ export default function AiChat({
           question: text,
           entry_id: prefill?.entry_id ?? undefined,
         }),
+        signal: ctrl.signal,
       });
       if (!res.body) throw new Error("无响应流");
       const reader = res.body.getReader();
@@ -190,11 +210,18 @@ export default function AiChat({
         }
       }
     } catch (e) {
+      // 切题/关面板导致的中断：静默丢弃，不写错误气泡、不污染新会话
+      if (ctrl.signal.aborted) return;
       setMessages((m) => [
         ...m.slice(0, -1),
         { role: "ai", text: "连接失败：" + String(e) },
       ]);
     } finally {
+      if (abortRef.current === ctrl) abortRef.current = null;
+      if (ctrl.signal.aborted) {
+        setBusy(false);
+        return;
+      }
       setBusy(false);
       refreshHistory();
       if (gotAnswer && prefill?.entry_id) {
@@ -367,22 +394,6 @@ export default function AiChat({
         onSubmit={(e) => { e.preventDefault(); void ask(input); }}
       >
         <div className="ai-composer">
-          {input && !busy && (
-            <button
-              type="button"
-              className="ai-clear"
-              aria-label="清空输入"
-              onClick={() => {
-                setInput("");
-                requestAnimationFrame(() => {
-                  autosize();
-                  taRef.current?.focus();
-                });
-              }}
-            >
-              ×
-            </button>
-          )}
           <textarea
             ref={taRef}
             value={input}
