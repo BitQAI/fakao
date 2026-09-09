@@ -98,22 +98,6 @@ def generate_evening_report(stats: dict) -> str:
     return (text or "").strip() or template
 
 
-def generate_morning_report(plan: dict, stats: dict) -> str:
-    template = (
-        f"早上好。距考试 {stats.get('days_left', '?')} 天。"
-        f"今日 {plan.get('quota', 0)} 条：新学 {plan.get('new_n', 0)}、"
-        f"复习 {plan.get('review_n', 0)}、错题 {plan.get('retry_n', 0)}。"
-        f"先复习错题，再推进新内容。"
-    )
-    text = call_llm(
-        SYSTEM_COACH,
-        "生成早报（3 行以内，含今日计划、重点提醒）："
-        + json.dumps({"plan": plan, "stats": stats}, ensure_ascii=False),
-        max_tokens=400,
-    )
-    return (text or "").strip() or template
-
-
 def generate_quiz(entry: dict) -> dict | None:
     text = call_llm(
         SYSTEM_COACH,
