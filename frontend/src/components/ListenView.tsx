@@ -36,13 +36,20 @@ export default function ListenView() {
   const [listenedToday, setListenedToday] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<SourceTarget | null>(null);
   const [statute, setStatute] = useState<string | null>(null);
-  const [showText, setShowText] = useState(false);
+  const [showText, setShowText] = useState(true);
   const [prefetching, setPrefetching] = useState(false);
   const prefetchRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const durRef = useRef(0);
   const playedRef = useRef(0);
   const exposedRef = useRef(false);
+  // 断线重连：重试计数 / 定时器 / 断点续播位置 / 是否处于恢复中
+  const retryRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+  const stallTimerRef = useRef<number | null>(null);
+  const resumeRef = useRef(0);
+  const recoveringRef = useRef(false);
+  const MAX_RETRY = 3;
 
   useEffect(() => {
     const entryParam = searchParams.get("entry");
@@ -119,7 +126,20 @@ export default function ListenView() {
     }
   }, [queue, idx, customRange]);
 
-  useEffect(() => { durRef.current = 0; playedRef.current = 0; exposedRef.current = false; setShowText(false); }, [idx]);
+  useEffect(() => {
+    durRef.current = 0; playedRef.current = 0; exposedRef.current = false;
+    retryRef.current = 0; resumeRef.current = 0; recoveringRef.current = false;
+    if (retryTimerRef.current !== null) { window.clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+    if (stallTimerRef.current !== null) { window.clearTimeout(stallTimerRef.current); stallTimerRef.current = null; }
+    setNotice("");
+    setShowText(true);
+  }, [idx]);
+
+  // 卸载时清理重连定时器
+  useEffect(() => () => {
+    if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
+    if (stallTimerRef.current !== null) window.clearTimeout(stallTimerRef.current);
+  }, []);
 
   // 预加载：剩 LISTEN_THRESHOLD 条时后台静默续取 LISTEN_PAGE 条（只追加不跳段）
   useEffect(() => {
@@ -293,6 +313,52 @@ export default function ListenView() {
     } catch (e) { setNotice("加载失败：" + String(e)); } finally { setLoadingMore(false); setMoreCount(""); }
   }
 
+  function clearStallTimer() {
+    if (stallTimerRef.current !== null) {
+      window.clearTimeout(stallTimerRef.current);
+      stallTimerRef.current = null;
+    }
+  }
+
+  function handleAudioError() {
+    clearStallTimer();
+    const n = retryRef.current;
+    // 404/503/断网在浏览器侧都表现为媒体错误，无法可靠区分：统一按瞬时故障退避重试
+    if (n < MAX_RETRY) {
+      retryRef.current = n + 1;
+      resumeRef.current = playedRef.current;
+      recoveringRef.current = true;
+      setNotice(`网络波动，正在重连（${n + 1}/${MAX_RETRY}）…`);
+      if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
+      const delay = [1500, 3000, 6000][n] ?? 6000;
+      retryTimerRef.current = window.setTimeout(() => {
+        retryTimerRef.current = null;
+        setPlayNonce((v) => v + 1); // remount 音频元素重建请求，加载后自动断点续播
+      }, delay);
+    } else {
+      recoveringRef.current = false;
+      setNotice("音频加载失败，已停止重连。请检查网络，或点「下一个」跳过。");
+    }
+  }
+
+  // 长时间缓冲无进展视为卡死，走同样的重连路径（10 秒看门狗）
+  function armStallTimer() {
+    clearStallTimer();
+    stallTimerRef.current = window.setTimeout(() => {
+      stallTimerRef.current = null;
+      handleAudioError();
+    }, 10000);
+  }
+
+  function handleAudioRecovered() {
+    clearStallTimer();
+    retryRef.current = 0;
+    if (recoveringRef.current) {
+      recoveringRef.current = false;
+      setNotice("");
+    }
+  }
+
   function markExposed(force = false) {
     if (exposedRef.current) return;
     // 短音频（<10s，库内 337 条 / 14.6%）按旧阈值 dur>=10 永不计数。
@@ -333,7 +399,7 @@ export default function ListenView() {
         <h2>{entry.subject} · {entry.point}{isMarked && <span className="badge">已标记</span>}{(entry.listened_today || listenedToday.has(entry.id)) && <span className="badge">今日已听</span>}{entry.listen_count ? <span className="badge">已听 {entry.listen_count} 次</span> : <span className="badge">未听</span>}</h2>
         <p className="muted">第 {idx + 1} 段 / 队列 {items.length} · {entry.listen_count ? `本条已听 ${entry.listen_count} 次` : "本条未听"} · 今日累计 {listenedToday.size} 条 · 累计已听 {heardTotal} · 剩余可听 {queue.remaining}{queue.generating ? " · 正在续批生成…" : ""}{prefetching ? " · 后面内容加载中…" : ""}</p>
         <p className="muted" style={{ fontSize: 12 }}>听学只记暴露，不记掌握</p>
-        <audio ref={audioRef} controls autoPlay key={`${entry.id}-${playNonce}`} src={`/api/audio/${entry.id}`} onLoadedMetadata={(e) => { durRef.current = Math.round(e.currentTarget.duration || 0); }} onTimeUpdate={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); }} onPlay={() => setPlaying(true)} onPause={(e) => { setPlaying(false); playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); markExposed(); }} onEnded={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || e.currentTarget.duration || 0); markExposed(true); next(); }} onError={() => setError("音频生成中或不可用，请稍后重试")} />
+        <audio ref={audioRef} controls autoPlay key={`${entry.id}-${playNonce}`} src={`/api/audio/${entry.id}`} onLoadedMetadata={(e) => { durRef.current = Math.round(e.currentTarget.duration || 0); if (resumeRef.current > 0) { const dur = e.currentTarget.duration || 0; try { e.currentTarget.currentTime = dur > 0 ? Math.max(0, Math.min(resumeRef.current, dur - 0.25)) : resumeRef.current; } catch { /* 忽略 seek 失败 */ } resumeRef.current = 0; } }} onTimeUpdate={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); }} onPlay={() => { setPlaying(true); handleAudioRecovered(); }} onCanPlay={handleAudioRecovered} onWaiting={armStallTimer} onStalled={armStallTimer} onPause={(e) => { setPlaying(false); playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); markExposed(); }} onEnded={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || e.currentTarget.duration || 0); markExposed(true); next(); }} onError={handleAudioError} />
         <div className="row">
           <button className="btn btn-ghost" disabled={idx === 0} onClick={prev}>上一个</button>
           <button className="btn btn-ghost" onClick={toggleMark}>{isMarked ? "已标记 ✓" : "标记"}</button>
