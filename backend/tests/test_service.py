@@ -141,17 +141,6 @@ def test_settings_and_days_left(tmp_db):
     assert service.days_left(conn, "2026-08-27") == 17
 
 
-def test_morning_report_reuses_same_day(tmp_db):
-    db_path, _ = tmp_db
-    conn = db.connect(db_path)
-    seed(conn)
-    first = service.morning_report(conn, "2026-08-27")
-    second = service.morning_report(conn, "2026-08-27")
-    assert first["id"] == second["id"]
-    assert "早上好" in first["content"] or first["content"]
-    assert "新学 5" in first["content"]
-
-
 def test_assistant_context_finds_entry(tmp_db):
     db_path, _ = tmp_db
     conn = db.connect(db_path)

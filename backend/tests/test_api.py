@@ -61,7 +61,7 @@ def test_today(client):
     data = client.get("/api/today").json()
     assert data["plan"]["quota"] == 1
     assert data["stats"]["quota"] == 1
-    assert data["morning_report"]["content"]
+    assert "morning_report" not in data
 
 
 def test_settings_roundtrip(client):

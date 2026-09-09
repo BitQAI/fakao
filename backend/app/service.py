@@ -300,25 +300,6 @@ def save_report(conn, day: str, kind: str, content: str) -> None:
     conn.commit()
 
 
-def morning_report(conn, day: str | None = None) -> dict | None:
-    from app.stats import today_stats
-
-    day = day or date.today().isoformat()
-    existing = latest_report(conn, "morning")
-    if existing and existing["date"] == day:
-        return existing
-    plan = ensure_today_plan(conn, day)
-    content = ai.generate_morning_report(
-        {**plan,
-         "new_n": plan["counts"]["new"],
-         "review_n": plan["counts"]["review"],
-         "retry_n": plan["counts"]["retry"]},
-        today_stats(conn, day),
-    )
-    save_report(conn, day, "morning", content)
-    return latest_report(conn, "morning")
-
-
 def evening_report(conn, day: str | None = None, force: bool = False) -> dict | None:
     from app.stats import today_stats
 
