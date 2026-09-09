@@ -67,7 +67,6 @@ export interface TodayPayload {
   plan: Plan;
   stats: Stats;
   streak: { current: number; longest: number };
-  morning_report: Report | null;
 }
 
 export interface ListenPayload {

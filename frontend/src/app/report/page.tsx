@@ -22,6 +22,7 @@ export default function ReportPage() {
   }, []);
 
   async function regenerate() {
+    if (evening && !confirm("重新生成将覆盖今日复盘并消耗 token，确定？")) return;
     const r = await postJson<Report>("/api/reports/generate/evening");
     setEvening(r);
   }
@@ -29,6 +30,10 @@ export default function ReportPage() {
   if (error) return <p className="muted">加载失败：{error}</p>;
 
   const stats: Stats | null = today?.stats ?? null;
+  const plan = today?.plan ?? null;
+  const daysLeft = today?.days_left ?? null;
+  const streak = today?.streak ?? null;
+  const ring = stats ? (360 * stats.percent) / 100 : 0;
   return (
     <div className="page-box">
       <div className="segments">
@@ -42,26 +47,58 @@ export default function ReportPage() {
       {view === "review" && (
         <>
           <section className="card">
-            <h2 className="card-title">今日数据</h2>
-            {stats ? (
-              <p className="muted">
-                看背+自测 {stats.done}/{stats.quota}（{stats.percent}%{stats.over_done ? "·超额" : ""}）· 听学 {stats.listen_min} 分钟 · 薄弱：{stats.weak}
-              </p>
-            ) : <p className="muted">暂无数据</p>}
+            <div className="page-head" style={{ marginBottom: 12 }}>
+              <h1 style={{ fontSize: 20 }}>今日进度</h1>
+              <span className={daysLeft !== null && daysLeft <= 17 ? "badge badge-red" : "badge"}>
+                {daysLeft === null ? "未设考试日期" : `距考试 ${daysLeft} 天`}
+              </span>
+            </div>
+            <div className="today-hero">
+              <div className="progress-ring-wrap">
+                <svg viewBox="0 0 44 44" className="progress-ring" role="img"
+                  aria-label={`今日完成 ${stats?.percent ?? 0}%`}>
+                  <circle cx="22" cy="22" r="18" className="ring-track" />
+                  <circle cx="22" cy="22" r="18" className="ring-bar"
+                    strokeDasharray={`${ring} 360`} />
+                </svg>
+                <span className="ring-text">{stats?.percent ?? 0}%</span>
+              </div>
+              <div className="today-hero-info">
+                <p className="today-hero-title">
+                  {!stats ? "暂无数据" : stats.over_done ? "超额完成 🎉" : `今日进度 ${stats.done}/${stats.quota}`}
+                </p>
+                {stats && (
+                  <p className="muted">
+                    看背+自测 {stats.done}/{stats.quota} · 听学 {stats.listen_min} 分钟{stats.weak ? ` · 薄弱：${stats.weak}` : ""}
+                  </p>
+                )}
+                {streak && streak.current > 0 && (
+                  <p className="muted stat-streak">🔥 连续学习 {streak.current} 天</p>
+                )}
+              </div>
+            </div>
+            {plan && (
+              <>
+                <div className="counts">
+                  <div className="count"><b>{plan.counts.new}</b><span>新学</span></div>
+                  <div className="count"><b>{plan.counts.review}</b><span>复习</span></div>
+                  <div className="count"><b>{plan.counts.retry}</b><span>错题</span></div>
+                  <div className="count">
+                    <b>{stats ? `${stats.done}/${stats.quota}` : "–"}</b>
+                    <span>{stats?.over_done ? "超额完成" : "看背+自测"}</span>
+                  </div>
+                </div>
+                <div className="report-content muted" dangerouslySetInnerHTML={{ __html: mdToHtml(plan.rationale) }} />
+              </>
+            )}
           </section>
-          {today?.morning_report && (
-            <section className="card">
-              <h2 className="card-title">早报</h2>
-              <div className="report-content" dangerouslySetInnerHTML={{ __html: mdToHtml(today.morning_report.content) }} />
-            </section>
-          )}
           <section className="card">
-            <h2 className="card-title">晚报</h2>
+            <h2 className="card-title">今日复盘</h2>
             {evening ? (
               <div className="report-content" dangerouslySetInnerHTML={{ __html: mdToHtml(evening.content) }} />
-            ) : <p className="muted">今天还没生成晚报，学完后点下面按钮。</p>}
+            ) : <p className="muted">学完后来生成今日复盘。</p>}
             <button className="btn btn-primary" onClick={() => void regenerate()}>
-              {evening ? "重新生成晚报" : "生成晚报"}
+              {evening ? "重新生成" : "生成今日复盘"}
             </button>
           </section>
         </>
