@@ -10,15 +10,6 @@ function base(size: number) {
   };
 }
 
-export function IconToday({ size = 21 }: IconProps) {
-  return (
-    <svg {...base(size)}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </svg>
-  );
-}
-
 export function IconStudy({ size = 21 }: IconProps) {
   return (
     <svg {...base(size)}>
