@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { delJson, getJson, postJson, putJson } from "@/lib/api";
 import { readMarked, readSavedQueue, writeMarked, writeSavedQueue } from "@/lib/progressStore";
+import { useAiShortcut } from "@/lib/aiShortcut";
 import type { Entry, MarkItem, Plan } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
@@ -30,7 +31,6 @@ export default function FlashcardView() {
   const [remaining, setRemaining] = useState(0);
   const [source, setSource] = useState<SourceTarget | null>(null);
   const [statute, setStatute] = useState<string | null>(null);
-  const [aiCount, setAiCount] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [marksOpen, setMarksOpen] = useState(false);
   const [marked, setMarked] = useState<MarkItem[]>([]);
@@ -40,7 +40,6 @@ export default function FlashcardView() {
   const [fPriority, setFPriority] = useState("高频考点");
   const [fNote, setFNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const aiCountCache = useRef<Map<string, number>>(new Map());
   const startRef = useRef(Date.now());
 
   useEffect(() => {
@@ -105,26 +104,8 @@ export default function FlashcardView() {
     setIndex(startIdx);
   }
 
-  const currentId = plan?.items[index]?.id ?? null;
-  const currentIdRef = useRef<string | null>(null);
-  currentIdRef.current = currentId;
-
-  // 同一条目问过 AI 则显示历史徽标（结果缓存，进卡即查）
-  useEffect(() => {
-    if (!currentId) return;
-    const cached = aiCountCache.current.get(currentId);
-    if (cached !== undefined) { setAiCount(cached); return; }
-    setAiCount(null);
-    let cancelled = false;
-    getJson<{ items: unknown[] }>(
-      `/api/assistant/history?entry_id=${encodeURIComponent(currentId)}&limit=50`
-    ).then((d) => {
-      if (cancelled) return;
-      aiCountCache.current.set(currentId, d.items.length);
-      setAiCount(d.items.length);
-    }).catch(() => { if (!cancelled) setAiCount(null); });
-    return () => { cancelled = true; };
-  }, [currentId]);
+  // 问 AI 快捷入口 + 历史条数徽标（与听学共用）
+  const { askAi, aiLabel } = useAiShortcut(plan?.items[index] ?? null);
 
   // 标记：与听学共用 /api/marks（含本地旧标记迁移）
   useEffect(() => {
@@ -140,19 +121,6 @@ export default function FlashcardView() {
         setMarked(fresh.items);
       }
     }).catch(() => {});
-  }, []);
-
-  // AI 问答成功后刷新徽标（AiChat 通过 ai-asked 事件通知）
-  useEffect(() => {
-    function handler(e: Event) {
-      const id = (e as CustomEvent<{ entry_id?: string }>).detail?.entry_id;
-      if (!id) return;
-      const next = (aiCountCache.current.get(id) ?? 0) + 1;
-      aiCountCache.current.set(id, next);
-      if (currentIdRef.current === id) setAiCount(next);
-    }
-    window.addEventListener("ai-asked", handler);
-    return () => window.removeEventListener("ai-asked", handler);
   }, []);
 
   if (error) return <p className="muted">加载失败：{error}</p>;
@@ -393,17 +361,6 @@ export default function FlashcardView() {
     window.location.href = `/study?view=read&entry=${encodeURIComponent(m.entry_id)}`;
   }
 
-  function askAi() {
-    window.dispatchEvent(new CustomEvent("ask-ai", {
-      detail: {
-        entry_id: entry.id,
-        question: `讲解「${entry.point}」的要点和易错点`,
-        title: entry.point,
-        description: `场景：${entry.anchor}\n结论：${entry.conclusion}`,
-      },
-    }));
-  }
-
   function openEdit() {
     setFPoint(entry.point);
     setFAnchor(entry.anchor);
@@ -511,7 +468,7 @@ export default function FlashcardView() {
               </div>
             )}
             <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); askAi(); }}>
-              问 AI{aiCount ? ` · ${aiCount}条历史` : ""}
+              问 AI{aiLabel}
             </button>
             <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); void toggleMark(); }}>
               {isMarked ? "已标记 ✓" : "标记"}

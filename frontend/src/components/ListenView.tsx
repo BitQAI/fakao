@@ -8,6 +8,7 @@ import {
   writeListenCustomQueue, readListenCustomQueue, clearListenCustomQueue,
 } from "@/lib/progressStore";
 import type { Entry, ListenPayload, MarkItem } from "@/lib/types";
+import { useAiShortcut } from "@/lib/aiShortcut";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 import { ListenMarksPanel } from "./ListenMarksPanel";
@@ -50,6 +51,9 @@ export default function ListenView() {
   const resumeRef = useRef(0);
   const recoveringRef = useRef(false);
   const MAX_RETRY = 3;
+
+  // 问 AI 快捷入口 + 历史条数徽标（与看背共用）
+  const { askAi, aiLabel } = useAiShortcut(queue?.items[idx] ?? null);
 
   useEffect(() => {
     const entryParam = searchParams.get("entry");
@@ -409,6 +413,7 @@ export default function ListenView() {
           <button className="btn btn-ghost" onClick={() => setShowText((s) => !s)}>
             {showText ? "收起原文" : "显示原文"}
           </button>
+          <button className="btn btn-ghost" onClick={askAi}>问 AI{aiLabel}</button>
         </div>
         {showText && (
           <div className="analysis" style={{ textAlign: "left" }}>
