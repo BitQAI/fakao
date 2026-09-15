@@ -13,9 +13,6 @@ PRIORITIES = {"高频考点", "易错陷阱", "新增必考", "普通"}
 CASE_SOURCES = ("人民法院案例库", "司法部案例库", "最高检指导性案例", "最高法指导性案例")
 MAX_CASES = 3
 ID_PATTERN = re.compile(r"^(MF|XF|XS|MS|SJ|LL|SG|XZ)-\d{3}$")
-ANCHOR_MIN, ANCHOR_MAX = 16, 36
-CONCLUSION_MAX = 60
-TTS_TEXT_MAX = 150
 REQUIRED_KEYS = ("id", "subject", "submodule", "point", "anchor", "conclusion",
                  "priority", "rationale", "sources", "statutes", "tts_text")
 
@@ -146,20 +143,17 @@ def validate_entry(e: dict, index: int) -> list[str]:
     if e.get("priority") not in PRIORITIES:
         errs.append(f"{tag} 优先级非法: {e.get('priority')!r}")
     anchor = e.get("anchor") or ""
-    if not (ANCHOR_MIN <= len(anchor) <= ANCHOR_MAX):
-        errs.append(f"{tag} 锚点句长度 {len(anchor)} 不在 {ANCHOR_MIN}-{ANCHOR_MAX} 内")
+    if not anchor.strip():
+        errs.append(f"{tag} 锚点句为空")
     conclusion = e.get("conclusion") or ""
-    if len(conclusion) > CONCLUSION_MAX or not conclusion.endswith("。"):
-        errs.append(f"{tag} 结论句超长或未以句号结尾")
+    if not conclusion.strip():
+        errs.append(f"{tag} 结论句为空")
     sources = e.get("sources") or []
     if not isinstance(sources, list) or not sources:
         errs.append(f"{tag} 参考来源至少 1 条")
     for s in sources:
         if not isinstance(s, dict) or not {"type", "ref", "loc"} <= set(s):
             errs.append(f"{tag} 来源格式非法: {s!r}")
-    tts = e.get("tts_text") or ""
-    if len(tts) > TTS_TEXT_MAX:
-        errs.append(f"{tag} TTS 文本超 {TTS_TEXT_MAX} 字")
     return errs
 
 

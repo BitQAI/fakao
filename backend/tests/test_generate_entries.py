@@ -13,6 +13,7 @@ from generate_entries import (  # noqa: E402
     fix_loc,
     fix_rationale,
     fix_tts,
+    over_limit,
     gap_blocks,
     generate,
     load_blocks,
@@ -25,7 +26,7 @@ from generate_entries import (  # noqa: E402
 
 def test_subject_prefixes():
     assert SUBJECT_PREFIX["刑诉"] == "XS"
-    assert SUBJECT_PREFIX["商经知"] == "SJ"
+    assert SUBJECT_PREFIX["商经知劳环"] == "SJ"
 
 
 def test_split_blocks_by_heading():
@@ -161,10 +162,12 @@ def test_fix_loc_returns_none_when_missing(monkeypatch, tmp_path):
     assert fix_loc("资料.md", "完全不存在的摘录") is None
 
 
-def test_fix_anchor_truncates_long():
+def test_fix_anchor_keeps_long():
+    """超长 anchor 不再截断（字数只告警），仅规整首尾空白。"""
     long_a = "这是一个非常长的场景描述" * 6
     fixed = fix_anchor(long_a)
-    assert len(fixed) <= 36
+    assert fixed == long_a
+    assert fix_anchor("  场景。  ") == "场景。"
     assert fix_anchor("短场景。") == "短场景。"
 
 
@@ -174,20 +177,30 @@ def test_fix_rationale_fills_by_priority():
     assert fix_rationale("已有理由。") == "已有理由。"
 
 
-def test_fix_conclusion_truncates_and_adds_period():
+def test_fix_conclusion_keeps_long_and_adds_period():
     long_c = "这是一个非常长的结论" * 10
     fixed = fix_conclusion(long_c)
-    assert len(fixed) <= 60 and fixed.endswith("。")
+    assert fixed == long_c + "。"
     no_period = fix_conclusion("结论没有句号但是很短")
     assert no_period.endswith("。")
     ok = fix_conclusion("结论正常且以句号结尾。")
     assert ok == "结论正常且以句号结尾。"
+    assert fix_conclusion("这样处理对吗？") == "这样处理对吗？"
 
 
-def test_fix_tts_truncates():
+def test_fix_tts_keeps_long():
+    """超长 tts_text 不再截断，避免朗读文本被切在半截。"""
     long_tts = "内容" * 80
-    assert len(fix_tts(long_tts)) <= 150
+    assert fix_tts(long_tts) == long_tts
     assert fix_tts("短文本") == "短文本"
+
+
+def test_over_limit_flags_without_blocking():
+    e = {"point": "考点" * 10, "anchor": "短", "conclusion": "结论" * 40,
+         "tts_text": "文" * 200}
+    flags = over_limit(e)
+    assert "point>15" in flags and "conclusion>60" in flags and "tts_text>150" in flags
+    assert "anchor<16" in flags
 
 
 def test_generate_writes_draft_file(monkeypatch, tmp_path):

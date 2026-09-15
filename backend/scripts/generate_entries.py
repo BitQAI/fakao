@@ -21,7 +21,7 @@ from app import ai, config, db, importer, statutes  # noqa: E402
 
 SUBJECT_PREFIX = {
     "刑法": "XF", "民法": "MF", "刑诉": "XS", "民诉": "MS",
-    "商经知": "SJ", "理论法": "LL", "三国法": "SG", "行政法": "XZ",
+    "商经知劳环": "SJ", "理论法": "LL", "三国法": "SG", "行政法": "XZ",
 }
 _BLOCK_RE = re.compile(r"(?m)(^#{2,4} |^## 【)")
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$")
@@ -30,6 +30,10 @@ SYSTEM_PROMPT = (
     "你是法考客观题冲刺资料提炼助手。根据备考资料提炼客观题条目，"
     "结论必须忠实于资料与现行法，不编造。"
 )
+
+# 建议区间（仅提示与告警，不做硬校验、不做硬截断）
+SOFT_LIMITS = {"point": 15, "anchor": 42, "conclusion": 60, "tts_text": 150}
+ANCHOR_SOFT_MIN = 16
 
 
 def split_blocks(text: str) -> list[str]:
@@ -159,15 +163,18 @@ def fix_loc(ref: str, loc: str) -> str | None:
     return None
 
 
+def over_limit(e: dict) -> list[str]:
+    """返回超出建议区间的字段（仅告警，不阻断、不截断）。"""
+    out = [f"{k}>{v}" for k, v in SOFT_LIMITS.items() if len(e.get(k) or "") > v]
+    anchor = e.get("anchor") or ""
+    if anchor and len(anchor) < ANCHOR_SOFT_MIN:
+        out.append(f"anchor<{ANCHOR_SOFT_MIN}")
+    return out
+
+
 def fix_anchor(a: str) -> str:
-    a = a.strip()
-    if len(a) <= 36:
-        return a
-    cut = a[:34]
-    idx = max(cut.rfind("，"), cut.rfind("；"), cut.rfind("、"))
-    if idx >= 20:
-        cut = cut[:idx]
-    return cut
+    """仅规整空白：超长不再截断，交由 over_limit 告警。"""
+    return a.strip()
 
 
 def fix_rationale(r: str, priority: str = "普通") -> str:
@@ -183,21 +190,18 @@ def fix_rationale(r: str, priority: str = "普通") -> str:
 
 
 def fix_conclusion(c: str) -> str:
+    """仅补齐结尾标点，不限字数（超长由 over_limit 告警）。"""
     c = c.strip()
     if not c:
         return "结论正确。"
-    if len(c) > 59:
-        c = c[:59]
-        idx = c.rfind("。")
-        if idx >= 20:
-            c = c[:idx + 1]
-    if not c.endswith("。"):
+    if not c.endswith(("。", "！", "？", "…")):
         c = c.rstrip("，；、 ") + "。"
     return c
 
 
 def fix_tts(t: str) -> str:
-    return t.strip()[:150]
+    """仅规整空白：超长不再截断，交由 over_limit 告警。"""
+    return t.strip()
 
 
 def _build_prompt(chunk: list[tuple[str, str]]) -> str:
@@ -207,13 +211,18 @@ def _build_prompt(chunk: list[tuple[str, str]]) -> str:
         "只输出 JSON 数组，元素字段：submodule/point/anchor/conclusion/priority/"
         "rationale/sources/statutes/note/tts_text。约束：\n"
         "- submodule：所属子科目（如 基本原则/分则-财产犯罪）\n"
-        "- point ≤ 15 字；anchor 16-36 字（客观题题干场景）\n"
-        "- conclusion ≤ 60 字且以句号结尾，涉及法条时注明条号\n"
+        "- 字数仅为建议区间：point ≤15 字、anchor 16-42 字（客观题题干场景）、"
+        "conclusion ≤60 字、tts_text ≤150 字。语义完整性优先，必要时可越界，"
+        "严禁为凑字数删减法条号、截断词句或省掉结论\n"
+        "- conclusion 以句号结尾，涉及法条时注明完整条号（如「刑诉法第192条」）\n"
         "- priority ∈ 高频考点/易错陷阱/新增必考/普通\n"
         "- sources 至少 1 条：{\"type\":\"高频\",\"ref\":\"资料文件名\",\"loc\":\"原文连续子串，必须逐字照抄资料\"}\n"
         "- statutes 为条文数组（如 [\"刑诉法16条\"]），资料未提则 []\n"
         "- note 为易错提示或 null\n"
-        "- tts_text ≤ 150 字，格式【科目·考点】场景。结论。\n"
+        "- tts_text 格式【科目·考点】+ 场景一句话 + 法条先行 + 结论：若 statutes 非空且资料"
+        "确有法条适用，写「依照刑诉法第192条、第193条规定，……构成XX罪。」；无明确法条"
+        "适用则直接给结论，不强行插入法条\n"
+        "- tts_text 是朗读文本，禁止 Markdown 标记（反引号/星号/井号），法条用简称+完整条号\n"
         "不要输出 Markdown 或任何 JSON 之外的内容。\n\n" + "\n\n".join(parts)
     )
 
@@ -277,6 +286,11 @@ def generate(subject: str, target: int = 0, batch: int = 5,
                 stats["discard"] += 1
                 print(f"  丢弃 {e.get('id')} {e.get('point')}: {errs[0][:80]}")
                 continue
+            warned = over_limit(e)
+            if warned:
+                stats.setdefault("over_limit", []).append(
+                    f"{e['id']} {','.join(warned)}")
+                print(f"  WARN 超出建议区间 {e['id']}: {','.join(warned)}")
             used_points.add(e["point"])
             new_entries.append(e)
             stats["ok"] += 1
@@ -303,7 +317,7 @@ def generate(subject: str, target: int = 0, batch: int = 5,
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="按科目资料批量生成法考条目 draft")
     ap.add_argument("--subject", required=True,
-                    help="科目名（刑法/民法/刑诉/民诉/商经知/理论法/三国法/行政法）")
+                    help="科目名（刑法/民法/刑诉/民诉/商经知劳环/理论法/三国法/行政法）")
     ap.add_argument("--target", type=int, default=0, help="目标新增条数（0=跑完所有资料块）")
     ap.add_argument("--batch", type=int, default=5)
     ap.add_argument("--out", default=None, help="输出 JSON 路径")

@@ -466,7 +466,7 @@ def update_entry_text(conn, entry_id: str, fields: dict) -> tuple[dict | None, s
     """看背就地更正：仅允许文本字段（不碰 tts/音频/status）。
 
     返回 (entry, error)：成功时 error 为 None；失败时 entry 为 None。
-    校验对齐 importer（锚点 16-36 字、结论 ≤60 且以“。”结尾、priority 枚举）。
+    字数只作建议区间、不硬校验；仅校验非空与 priority 枚举（对齐 importer）。
     """
     row = conn.execute("SELECT id FROM entries WHERE id=? AND status='final'",
                        (entry_id,)).fetchone()
@@ -480,10 +480,10 @@ def update_entry_text(conn, entry_id: str, fields: dict) -> tuple[dict | None, s
     note = None if note is None or not str(note).strip() else str(note).strip()
     if not point:
         return None, "point 不能为空"
-    if not 16 <= len(anchor) <= 36:
-        return None, f"锚点句长度 {len(anchor)} 不在 16-36 内"
-    if not conclusion or len(conclusion) > 60 or not conclusion.endswith("。"):
-        return None, "结论句超长或未以句号结尾（≤60 且以“。”结尾）"
+    if not anchor:
+        return None, "anchor 不能为空"
+    if not conclusion:
+        return None, "conclusion 不能为空"
     if priority not in ENTRY_TEXT_PRIORITIES:
         return None, f"优先级非法: {priority!r}"
     conn.execute(
