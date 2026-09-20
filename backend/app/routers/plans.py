@@ -3,7 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app import db, service
+from app import db, service, statute_cards
 
 router = APIRouter(prefix="/api", tags=["plans"])
 
@@ -51,7 +51,10 @@ def update_entry(entry_id: str, payload: UpdateEntryIn, conn=Depends(db.get_db))
 
 @router.get("/plans/today")
 def get_today_plan(conn=Depends(db.get_db)):
-    return service.ensure_today_plan(conn, date.today().isoformat())
+    """今日计划 + 看背用的法条卡（每 3 张留 1 张，未看过优先）。"""
+    payload = service.ensure_today_plan(conn, date.today().isoformat())
+    payload["statute_cards"] = statute_cards.for_plan(conn, payload, mode="read")
+    return payload
 
 
 @router.post("/plans/generate")

@@ -165,3 +165,11 @@ def stats(conn) -> dict:
         "SELECT COUNT(*) c FROM card_seen WHERE mode=?", (mode,)).fetchone()["c"]
         for mode in MODES}
     return {"total": total, "seen": seen}
+
+
+def for_plan(conn, plan: dict, mode: str = "read") -> list[dict]:
+    """按今日计划配额取法条卡：每 3 张留 1 张，科目跟随今日计划，未看过优先。"""
+    quota = max(1, (plan.get("quota") or 0) // 3)
+    focus = list(dict.fromkeys(
+        it["subject"] for it in plan.get("items", []) if it.get("subject")))
+    return pool(conn, subjects=focus or None, mode=mode, limit=quota)

@@ -4,16 +4,19 @@ import { useSearchParams } from "next/navigation";
 import { delJson, getJson, postJson, putJson } from "@/lib/api";
 import { readMarked, readSavedQueue, writeMarked, writeSavedQueue } from "@/lib/progressStore";
 import { useAiShortcut } from "@/lib/aiShortcut";
-import type { Entry, MarkItem, Plan } from "@/lib/types";
+import type { Entry, MarkItem, Plan, StatuteCard } from "@/lib/types";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 import { ListenMarksPanel } from "./ListenMarksPanel";
+import StatuteCardView from "./StatuteCardView";
 
 const READ_STORE_KEY = "fakao.read.queue.v1";
 
 export default function FlashcardView() {
   const searchParams = useSearchParams();
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [cards, setCards] = useState<StatuteCard[]>([]);
+  const [cardIndex, setCardIndex] = useState(0);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [done, setDone] = useState(0);
@@ -63,6 +66,7 @@ export default function FlashcardView() {
     getJson<Plan>("/api/plans/today")
       .then((p) => {
         setReviewedToday(new Set(p.items.filter((i) => i.reviewed_today).map((i) => i.id)));
+        setCards(p.statute_cards ?? []);   // 法条题卡：看完条目卡后接着刷
         if (!entryParam) {
           restoreQueue(p);
           return;
@@ -129,6 +133,23 @@ export default function FlashcardView() {
   const items = plan.items;
   if (items.length === 0) {
     return <div className="card"><p>今日没有条目，请先到「我的」导入数据。</p></div>;
+  }
+  // 条目卡看完后接着刷法条题卡（今日计划附带的，每 3 张留 1 张）
+  if (index >= items.length && cardIndex < cards.length) {
+    return (
+      <div>
+        <p className="muted">
+          今日条目卡已看完 · 接着刷法条题卡（覆盖法条库新增条文）
+        </p>
+        <StatuteCardView
+          card={cards[cardIndex]}
+          index={cardIndex}
+          total={cards.length}
+          mode="read"
+          onNext={() => setCardIndex((i) => i + 1)}
+        />
+      </div>
+    );
   }
   if (index >= items.length) {
     return (

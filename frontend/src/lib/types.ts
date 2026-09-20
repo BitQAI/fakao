@@ -38,6 +38,26 @@ export interface Plan {
   rationale: string;
   items: Entry[];
   counts: { retry: number; review: number; new: number };
+  /** 看背用的法条题卡（每 3 张留 1 张，未看过优先） */
+  statute_cards?: StatuteCard[];
+}
+
+/** 法条卡：一条法条 + 基于它命制的题（法条驱动题在四个入口共用） */
+export interface StatuteCard {
+  kind: "statute";
+  quiz_id: number;
+  subject: string;
+  qtype: "choice" | "cloze" | "judge";
+  stem: string;
+  options: string[];
+  answer: string;
+  analysis: string;
+  basis: string;
+  law_key: string;
+  no: number;
+  sub: number;
+  article_text: string;
+  unseen?: boolean;
 }
 
 export interface Stats {
