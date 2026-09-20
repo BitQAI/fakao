@@ -189,6 +189,34 @@ def test_listen_queue_orders_by_priority_then_subject(tmp_db):
     assert ids.index("XF-001") < ids.index("LL-001")
 
 
+def test_listen_queue_puts_entries_before_cards_at_same_priority(tmp_db):
+    """同优先级下正式条目先于法条题卡：卡片不会挤掉还没听过的条目。"""
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final", "generated_at": "x",
+        "count": 1, "entries": [{
+            "id": "XF-001", "subject": "刑法", "submodule": "总则",
+            "point": "普通条目", "anchor": "甲实施行为后产生完整案件事实描述",
+            "conclusion": "成立结论。", "priority": "普通",
+            "rationale": "x", "sources": [{"type": "高频", "ref": "a.md", "loc": "x"}],
+            "statutes": [], "note": None, "tts_text": "文本。",
+        }]})
+    conn.execute(
+        "INSERT INTO entries (id, subject, submodule, point, anchor, conclusion,"
+        " priority, rationale, sources, cases, statutes, note, tts_text, status,"
+        " kind, options, article_text)"
+        " VALUES ('XF-Q000777','刑法','中华人民共和国刑法','刑法第一条 · 题',"
+        "'甲的行为如何定性？','A','普通','解析','[]','[]','[\"刑法第一条\"]',NULL,"
+        "'法条依据：刑法第一条。','final','card','[\"A. 甲\",\"B. 乙\"]','第一条原文')")
+    conn.commit()
+
+    data = service.listen_queue(conn, limit=10)
+    ids = [e["id"] for e in data["items"]]
+    assert ids.index("XF-001") < ids.index("XF-Q000777")
+    conn.close()
+
+
 def test_listen_queue_not_truncated_by_id_before_ranking(tmp_db):
     """id 字典序在前的科目（如 LL）不应挤掉未听高频的 XF 条目。"""
     db_path, _ = tmp_db

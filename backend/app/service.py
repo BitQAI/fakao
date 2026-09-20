@@ -381,21 +381,25 @@ def record_chat(conn, question: str, answer: str,
 
 
 def _sort_listen_items(items: list[dict]) -> list[dict]:
-    """听学统一排序：未听优先 → 次数少优先 → 久未听优先 → 优先级 → 科目 → id。"""
+    """听学统一排序：未听优先 → 次数少优先 → 久未听优先 → 优先级 → 类型 → 科目 → id。
+
+    类型（kind）：同一优先级下**正式条目先于法条题卡**，这样卡片不会挤掉还没听过的条目。
+    """
     never: list[tuple] = []
     heard: list[tuple] = []
     for e in items:
         cnt = e.get("listen_count", 0) or 0
         last = e.get("last_ts")
         prio_rank = scheduler.PRIORITY_ORDER.get(e.get("priority"), 9)
+        kind_rank = 1 if e.get("kind") == "card" else 0
         subj = e.get("subject")
         subj_rank = (scheduler.SUBJECT_ORDER.index(subj)
                      if subj in scheduler.SUBJECT_ORDER
                      else len(scheduler.SUBJECT_ORDER))
-        tup = (e, cnt, last or "", prio_rank, subj_rank, e.get("id", ""))
+        tup = (e, cnt, last or "", prio_rank, kind_rank, subj_rank, e.get("id", ""))
         (never if cnt == 0 else heard).append(tup)
-    never.sort(key=lambda t: (t[3], t[4], t[5]))
-    heard.sort(key=lambda t: (t[1], t[2], t[3], t[4], t[5]))
+    never.sort(key=lambda t: (t[3], t[4], t[5], t[6]))
+    heard.sort(key=lambda t: (t[1], t[2], t[3], t[4], t[5], t[6]))
     return [t[0] for t in never + heard]
 
 
@@ -409,7 +413,7 @@ def _listen_pool(conn, exclude: set[str] | None = None, limit: int | None = None
     exclude = exclude or set()
     rows = conn.execute(
         """
-        SELECT e.id, e.subject, e.priority,
+        SELECT e.id, e.subject, e.priority, e.kind,
                (SELECT COUNT(*) FROM reviews r
                 WHERE r.entry_id=e.id AND r.mode='listen') AS listen_count,
                (SELECT MAX(r.ts) FROM reviews r
@@ -425,7 +429,8 @@ def _listen_pool(conn, exclude: set[str] | None = None, limit: int | None = None
                           WHERE r.entry_id=e.id AND r.mode='listen')
         """).fetchone()["n"]
     light = [{"id": r["id"], "subject": r["subject"], "priority": r["priority"],
-              "listen_count": r["listen_count"], "last_ts": r["last_ts"]}
+              "kind": r["kind"], "listen_count": r["listen_count"],
+              "last_ts": r["last_ts"]}
              for r in rows if r["id"] not in exclude]
     ordered = _sort_listen_items(light)
     if limit:
