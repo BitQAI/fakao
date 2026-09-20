@@ -97,11 +97,29 @@
 # 数字判断题（数量/金额/年限/人数/期限）：法条侧 + 条目侧
 .venv/bin/python scripts/build_judge_bank.py --source statutes --per-law 3
 .venv/bin/python scripts/build_judge_bank.py --source entries
+.venv/bin/python scripts/build_judge_bank.py --source counterparts --limit 500  # 补「错」题配平答案分布
 .venv/bin/python scripts/build_judge_bank.py --publish
+.venv/bin/python scripts/build_judge_bank.py --fix-subjects   # 科目口径修正
+.venv/bin/python scripts/build_judge_bank.py --fix-basis      # basis 规范成「法条库主名+条号」
+
+# 法条驱动的客观题（让「法条库补全」直接变成题库资产）
+.venv/bin/python scripts/build_statute_quiz.py --dry-run
+.venv/bin/python scripts/build_statute_quiz.py --only-cited --limit 50   # 先补条目引用过的条文
+.venv/bin/python scripts/build_statute_quiz.py --per-law 3 --workers 6   # 每法配额补足（可多跑几轮）
+.venv/bin/python scripts/build_statute_quiz.py --laws 生态环境法典 --per-law 12  # 大法加深
+.venv/bin/python scripts/build_statute_quiz.py --publish
+
+# 覆盖率与核验（每部法多少条文被题目覆盖；判断题回源核验 strict/loose）
+.venv/bin/python scripts/audit_quiz_coverage.py --top 30 \
+  --report ../docs/superpowers/research/2026-09-20-法条覆盖与题库核验报告.md
 
 # 题库概览
 curl -s localhost:8090/api/quiz/bank/stats
 ```
+
+**覆盖口径**：法条覆盖率 = 被题目覆盖的条文数 / 条文总数（`quizzes.basis` 能解析到该法该条）。
+条目派生题只覆盖「已写进条目的考点」，所以必须用 `build_statute_quiz.py` 按法条库缺口补题；
+组卷（`custom_quiz`）会留 1/3 题量给法条驱动题，否则补出来的题练不到。
 
 **数字判断题的硬闸门**（`app/number_terms.py`）：「对」题的数字必须全部能在依据原文
 （法条 / 条目结论）中找到；「错」题只允许改写一处数字。不满足即丢弃，避免编造数字。

@@ -104,13 +104,19 @@ cd frontend && npm run dev   # /api 自动代理到 8000
 ```bash
 .venv/bin/python scripts/build_quiz_bank.py --only-missing --workers 6   # 条目 → 客观题库
 .venv/bin/python scripts/build_quiz_bank.py --publish                    # 抽检后发布
+.venv/bin/python scripts/build_statute_quiz.py --per-law 3 --workers 6   # 法条库 → 客观题库
+.venv/bin/python scripts/build_statute_quiz.py --publish
 .venv/bin/python scripts/build_judge_bank.py --source statutes --per-law 3
 .venv/bin/python scripts/build_judge_bank.py --source entries
+.venv/bin/python scripts/build_judge_bank.py --source counterparts --limit 500
 .venv/bin/python scripts/build_judge_bank.py --publish
+.venv/bin/python scripts/audit_quiz_coverage.py --top 30 \
+  --report ../docs/superpowers/research/2026-09-20-法条覆盖与题库核验报告.md
 ```
 
 题库题与当日缓存题同表（`quizzes`，按 `origin` 区分）；自测/组卷/数判优先取题库，
-题库缺题才回退 LLM 现生成。数字判断题有硬校验：题干数字必须能在法条/结论原文中找到。
+题库缺题才回退 LLM 现生成。组卷会留约 1/3 题量给「法条驱动题」（basis 有值、不挂条目），
+保证法条库补全的内容能被练到。数字判断题有硬校验：题干数字必须能在法条/结论原文中找到。
 
 ### TTS 质检与修复（在 `backend/` 下执行）
 
