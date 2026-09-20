@@ -61,6 +61,30 @@ def test_coverage_counts_cited_and_covered(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_coverage_counts_only_published_questions(tmp_path, monkeypatch):
+    """草稿题不计入覆盖率（用户练不到，且下一轮缺口计算依赖它）。"""
+    law_dir = tmp_path / "法条库"
+    law_dir.mkdir()
+    (law_dir / "中华人民共和国刑法.md").write_text(
+        "# 中华人民共和国刑法\n\n"
+        "第一条　为了惩罚犯罪，保护人民，根据宪法，制定本法。\n"
+        "第二条　中华人民共和国刑法的任务，是用刑罚同一切犯罪行为作斗争。\n",
+        encoding="utf-8")
+    monkeypatch.setattr(statute_coverage.config, "STATUTE_DIR", law_dir)
+
+    conn = db.connect(tmp_path / "cov3.db")
+    quiz_bank.save_question(conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK,
+                            subject="刑法", stem="题干足够长的一句话",
+                            options=["A. 甲", "B. 乙", "C. 丙", "D. 丁"],
+                            answer="A", status="draft", basis="中华人民共和国刑法第一条")
+    assert statute_coverage.coverage(conn)[0]["covered"] == 0
+
+    conn.execute("UPDATE quizzes SET status='published'")
+    conn.commit()
+    assert statute_coverage.coverage(conn)[0]["covered"] == 1
+    conn.close()
+
+
 def test_coverage_ignores_unparsable_refs(tmp_path, monkeypatch):
     law_dir = tmp_path / "法条库"
     law_dir.mkdir()

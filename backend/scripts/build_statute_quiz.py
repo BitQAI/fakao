@@ -55,9 +55,14 @@ USER_TEMPLATE = """下面是一条现行法条原文。请据此命一道法考�
 
 
 def covered_map(conn) -> dict[str, set[tuple[int, int]]]:
-    """已被题目覆盖的条文：{法条库主名: {(条号, 子条号)}}。"""
+    """已被**已发布**题目覆盖的条文：{法条库主名: {(条号, 子条号)}}。
+
+    只算 published：draft 还在生成流程里（用户练不到），
+    否则同一轮草稿会把下一轮的缺口算成 0。
+    """
     out: dict[str, set[tuple[int, int]]] = {}
-    for row in conn.execute("SELECT basis FROM quizzes WHERE basis != ''"):
+    for row in conn.execute(
+            "SELECT basis FROM quizzes WHERE basis != '' AND status='published'"):
         located = statutes.resolve_law_article(row["basis"])
         if located:
             out.setdefault(located[0], set()).add((located[1], located[2]))

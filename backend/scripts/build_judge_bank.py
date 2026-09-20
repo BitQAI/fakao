@@ -161,10 +161,14 @@ def _covered(law: str, no: int,
 
 
 def covered_basis(conn) -> set[tuple[str, int, int]]:
-    """已出过题的法条 {(法条库主名, 条号, 子条号)}，避免重复出同一考点。"""
+    """已出过题的法条 {(法条库主名, 条号, 子条号)}，避免重复出同一考点。
+
+    只算 published：draft 还在生成流程里，下一轮应当重新取到。
+    """
     out: set[tuple[str, int, int]] = set()
     rows = conn.execute(
-        "SELECT basis FROM quizzes WHERE origin=? AND basis != ''",
+        "SELECT basis FROM quizzes WHERE origin=? AND basis != ''"
+        " AND status='published'",
         (quiz_bank.ORIGIN_JUDGE,)).fetchall()
     for row in rows:
         located = statutes.resolve_law_article(row["basis"])

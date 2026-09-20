@@ -6,7 +6,8 @@
 口径：
 - 条文总数：`app/statute_index` 解析出的条文数（含子条）；
 - 被条目引用：条目 `statutes` 字段能解析到该法该条的条数；
-- 被题目覆盖：题库题（`quizzes.basis`）能解析到该法该条的条数（客观题与判断题都算）；
+- 被题目覆盖：**已发布**题库题（`quizzes.basis`，status='published'）能解析到该法该条的条数
+  （客观题与判断题都算）；draft 是生成中间态、archived 是下架题，用户练不到，不计入；
 - 覆盖率 = 被题目覆盖条文数 / 条文总数。
 """
 import json
@@ -50,7 +51,8 @@ def coverage(conn, directory=None) -> list[dict]:
     cited = _refs((r["statutes"] for r in conn.execute(
         "SELECT statutes FROM entries WHERE status='final'")), "statutes")
     covered = _refs((r["basis"] for r in conn.execute(
-        "SELECT basis FROM quizzes WHERE basis != ''")), "basis")
+        "SELECT basis FROM quizzes WHERE basis != '' AND status='published'")),
+        "basis")
     out = []
     for key, law in library.items():
         valid = {(a.no, a.sub) for a in law.articles}

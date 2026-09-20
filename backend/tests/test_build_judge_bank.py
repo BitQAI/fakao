@@ -78,8 +78,13 @@ def test_covered_basis_reads_existing_questions(tmp_db):
             "statutes": [], "note": None, "tts_override": None, "tts_text": "文本。"}]})
     quiz_bank.save_question(conn, qtype="judge", origin=quiz_bank.ORIGIN_JUDGE,
                             subject="刑法", stem="法定最高刑不满五年，追诉时效为五年。",
-                            answer="对", basis="中华人民共和国刑法第八十七条")
+                            answer="对", basis="中华人民共和国刑法第八十七条",
+                            status="published")
     assert bjb.covered_basis(conn) == {("中华人民共和国刑法", 87, 0)}
+    # 草稿题不算「已出过题」：下一轮应当重新取到该条
+    conn.execute("UPDATE quizzes SET status='draft'")
+    conn.commit()
+    assert bjb.covered_basis(conn) == set()
     conn.close()
     assert json.dumps({})  # 保持 import 语义明确（json 用于其他断言场景）
 
