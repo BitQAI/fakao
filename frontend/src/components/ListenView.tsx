@@ -14,6 +14,7 @@ import SourceViewer, { type SourceTarget } from "./SourceViewer";
 import { ListenMarksPanel } from "./ListenMarksPanel";
 import ListenSegment from "./listen/ListenSegment";
 import ListenFinishCard from "./listen/ListenFinishCard";
+import { useListenAudio } from "./listen/useListenAudio";
 import { useListenCustom } from "./listen/useListenCustom";
 import { useListenMarked } from "./listen/useListenMarked";
 import { loadListenInitial, LISTEN_PAGE, LISTEN_THRESHOLD } from "@/lib/listenInit";
@@ -36,17 +37,6 @@ export default function ListenView() {
   const [showText, setShowText] = useState(true);
   const [prefetching, setPrefetching] = useState(false);
   const prefetchRef = useRef(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const durRef = useRef(0);
-  const playedRef = useRef(0);
-  const exposedRef = useRef(false);
-  // 断线重连：重试计数 / 定时器 / 断点续播位置 / 是否处于恢复中
-  const retryRef = useRef(0);
-  const retryTimerRef = useRef<number | null>(null);
-  const stallTimerRef = useRef<number | null>(null);
-  const resumeRef = useRef(0);
-  const recoveringRef = useRef(false);
-  const MAX_RETRY = 3;
 
   // 问 AI 快捷入口 + 历史条数徽标（与看背共用）
   const { askAi, aiLabel } = useAiShortcut(queue?.items[idx] ?? null);
@@ -55,6 +45,10 @@ export default function ListenView() {
     queue, setQueue, heardTotal, setHeardTotal, setIdx, setPlaying,
     setDeep, setNotice, setListenedToday,
   });
+  const audio = useListenAudio({ setNotice, setPlayNonce });
+  const { audioRef, durRef, playedRef, exposedRef, resumeRef,
+    clearStallTimer, handleAudioError, armStallTimer, handleAudioRecovered,
+    resetForSegment } = audio;
   const {
     customRange, setCustomRange, seenIds, setSeenIds, remaining, setRemaining,
     loadingMore, moreCount, setMoreCount, pickerOpen, setPickerOpen,
@@ -127,19 +121,10 @@ export default function ListenView() {
   }, [queue, idx, customRange]);
 
   useEffect(() => {
-    durRef.current = 0; playedRef.current = 0; exposedRef.current = false;
-    retryRef.current = 0; resumeRef.current = 0; recoveringRef.current = false;
-    if (retryTimerRef.current !== null) { window.clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
-    if (stallTimerRef.current !== null) { window.clearTimeout(stallTimerRef.current); stallTimerRef.current = null; }
+    resetForSegment();
     setNotice("");
     setShowText(true);
-  }, [idx]);
-
-  // 卸载时清理重连定时器
-  useEffect(() => () => {
-    if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
-    if (stallTimerRef.current !== null) window.clearTimeout(stallTimerRef.current);
-  }, []);
+  }, [idx, resetForSegment, setNotice]);
 
   // 预加载：剩 LISTEN_THRESHOLD 条时后台静默续取 LISTEN_PAGE 条（只追加不跳段）
   useEffect(() => {
@@ -246,52 +231,6 @@ export default function ListenView() {
         <CustomRangePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onConfirm={(r) => void applyCustom(r)} />
       </div>
     );
-  }
-
-  function clearStallTimer() {
-    if (stallTimerRef.current !== null) {
-      window.clearTimeout(stallTimerRef.current);
-      stallTimerRef.current = null;
-    }
-  }
-
-  function handleAudioError() {
-    clearStallTimer();
-    const n = retryRef.current;
-    // 404/503/断网在浏览器侧都表现为媒体错误，无法可靠区分：统一按瞬时故障退避重试
-    if (n < MAX_RETRY) {
-      retryRef.current = n + 1;
-      resumeRef.current = playedRef.current;
-      recoveringRef.current = true;
-      setNotice(`网络波动，正在重连（${n + 1}/${MAX_RETRY}）…`);
-      if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
-      const delay = [1500, 3000, 6000][n] ?? 6000;
-      retryTimerRef.current = window.setTimeout(() => {
-        retryTimerRef.current = null;
-        setPlayNonce((v) => v + 1); // remount 音频元素重建请求，加载后自动断点续播
-      }, delay);
-    } else {
-      recoveringRef.current = false;
-      setNotice("音频加载失败，已停止重连。请检查网络，或点「下一个」跳过。");
-    }
-  }
-
-  // 长时间缓冲无进展视为卡死，走同样的重连路径（10 秒看门狗）
-  function armStallTimer() {
-    clearStallTimer();
-    stallTimerRef.current = window.setTimeout(() => {
-      stallTimerRef.current = null;
-      handleAudioError();
-    }, 10000);
-  }
-
-  function handleAudioRecovered() {
-    clearStallTimer();
-    retryRef.current = 0;
-    if (recoveringRef.current) {
-      recoveringRef.current = false;
-      setNotice("");
-    }
   }
 
   function markExposed(force = false) {
