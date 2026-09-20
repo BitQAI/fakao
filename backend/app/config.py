@@ -28,6 +28,8 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+# 备用 key：仅当主 key 的 TTS_MODELS 全部失败时启用（缺省为空=不启用）
+DASHSCOPE_API_KEY_FALLBACK = os.getenv("DASHSCOPE_API_KEY_FALLBACK", "")
 TTS_MODELS = [m.strip() for m in os.getenv(
     "TTS_MODELS",
     "qwen-tts,qwen-tts-2025-05-22,qwen-tts-2025-04-10",
