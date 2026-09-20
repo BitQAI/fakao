@@ -27,6 +27,20 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
+# opencode zen 通道（deepseek-v4.1-flash，推理模型）：批量/离线生成优先用它
+OPENCODE_API_KEY = os.getenv("OPENCODE_API_KEY", "")
+OPENCODE_BASE_URL = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1")
+OPENCODE_MODEL = os.getenv("OPENCODE_MODEL", "deepseek-v4.1-flash")
+#: 该通道要求带 x-opencode-session 头（缺了会 400 MissingSessionID）
+OPENCODE_SESSION = os.getenv("OPENCODE_SESSION", "fk-fakao-tool")
+#: 推理模型先把预算花在思考上，给太小会返回空串，这里设下限
+OPENCODE_MIN_MAX_TOKENS = int(os.getenv("OPENCODE_MIN_MAX_TOKENS", "1600"))
+#: LLM 供应商顺序（只启用配置了 key 的；空串=不调用 LLM）
+LLM_PROVIDER_ORDER = [p.strip() for p in os.getenv(
+    "LLM_PROVIDER_ORDER", "opencode,deepseek").split(",") if p.strip()]
+#: 交互式问答（流式）默认仍走 DeepSeek：opencode 是推理模型，首字延迟明显更高
+LLM_CHAT_PROVIDER = os.getenv("LLM_CHAT_PROVIDER", "deepseek")
+
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 # 备用 key：仅当主 key 的 TTS_MODELS 全部失败时启用（缺省为空=不启用）
 DASHSCOPE_API_KEY_FALLBACK = os.getenv("DASHSCOPE_API_KEY_FALLBACK", "")

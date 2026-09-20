@@ -1,12 +1,72 @@
-"""DeepSeek 客户端与全部规则兜底。
+"""LLM 供应商链与全部规则兜底。
+
+批量/离线生成优先走 opencode 的 `deepseek-v4.1-flash`，失败再落 DeepSeek；
+供应商顺序由 `LLM_PROVIDER_ORDER` 决定，任一家的 key 缺失就自动跳过。
+
+opencode 通道有两个坑（2026-09-20 实测）：
+- 必须带 `x-opencode-session` 头，否则 400 MissingSessionID；
+- 它是推理模型，`max_tokens` 会先被思考吃掉，给太小返回**空串**，
+  因此这里抬到 `OPENCODE_MIN_MAX_TOKENS`，并把空串当失败继续回落。
 
 设计原则（spec 九）：LLM 故障时核心流程不中断，所有生成函数都有纯规则兜底。
 """
 import json
+from dataclasses import dataclass
+from functools import lru_cache
 
 from openai import AsyncOpenAI, OpenAI
 
 from app import config
+
+
+@dataclass(frozen=True)
+class Provider:
+    """一个 OpenAI 兼容供应商。"""
+
+    name: str
+    api_key: str
+    base_url: str
+    model: str
+    min_max_tokens: int = 0
+    session_header: bool = False
+
+
+def provider_chain() -> list[Provider]:
+    """按配置顺序返回可用供应商（未配置 key 的跳过）。"""
+    known = {
+        "opencode": lambda: Provider(
+            "opencode", config.OPENCODE_API_KEY, config.OPENCODE_BASE_URL,
+            config.OPENCODE_MODEL, config.OPENCODE_MIN_MAX_TOKENS, True),
+        "deepseek": lambda: Provider(
+            "deepseek", config.DEEPSEEK_API_KEY, config.DEEPSEEK_BASE_URL,
+            config.DEEPSEEK_MODEL),
+    }
+    out: list[Provider] = []
+    for name in config.LLM_PROVIDER_ORDER:
+        build = known.get(name)
+        if build is None:
+            continue
+        provider = build()
+        if provider.api_key:
+            out.append(provider)
+    return out
+
+
+#: 最近一次成功命中的供应商（排障用：DeepSeek 欠费时能看出是谁在干活）
+_last_provider: str | None = None
+
+
+def provider_status() -> dict:
+    """各供应商启用情况 + 最近一次命中的供应商。"""
+    return {"order": [p.name for p in provider_chain()],
+            "last_used": _last_provider,
+            "chat_provider": config.LLM_CHAT_PROVIDER}
+
+
+@lru_cache(maxsize=8)
+def _client(api_key: str, base_url: str) -> OpenAI:
+    return OpenAI(api_key=api_key, base_url=base_url)
+
 
 SYSTEM_COACH = (
     "你是法考客观题冲刺教练。回答简洁、口语化、面向手机阅读，"
@@ -15,34 +75,57 @@ SYSTEM_COACH = (
 
 
 def get_client() -> OpenAI | None:
-    if not config.DEEPSEEK_API_KEY:
+    """第一个可用供应商的客户端（保留旧接口；批量生成走 call_llm 的链式回退）。"""
+    chain = provider_chain()
+    if not chain:
         return None
-    return OpenAI(api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL)
+    return _client(chain[0].api_key, chain[0].base_url)
 
 
 def get_async_client() -> AsyncOpenAI | None:
+    """流式问答客户端：供应商由 `LLM_CHAT_PROVIDER` 决定（默认 deepseek，首字更快）。"""
+    if config.LLM_CHAT_PROVIDER == "opencode" and config.OPENCODE_API_KEY:
+        return AsyncOpenAI(api_key=config.OPENCODE_API_KEY,
+                           base_url=config.OPENCODE_BASE_URL)
     if not config.DEEPSEEK_API_KEY:
         return None
     return AsyncOpenAI(api_key=config.DEEPSEEK_API_KEY,
                        base_url=config.DEEPSEEK_BASE_URL)
 
 
+def chat_target() -> tuple[AsyncOpenAI | None, str, dict]:
+    """流式问答的（客户端, 模型名, 额外请求头）。"""
+    client = get_async_client()
+    if client is None:
+        return None, "", {}
+    if config.LLM_CHAT_PROVIDER == "opencode" and config.OPENCODE_API_KEY:
+        return (client, config.OPENCODE_MODEL,
+                {"x-opencode-session": config.OPENCODE_SESSION})
+    return client, config.DEEPSEEK_MODEL, {}
+
+
 def call_llm(system: str, user: str, temperature: float = 0.3,
              max_tokens: int = 1200) -> str | None:
-    client = get_client()
-    if client is None:
-        return None
-    try:
-        resp = client.chat.completions.create(
-            model=config.DEEPSEEK_MODEL,
-            messages=[{"role": "system", "content": system},
-                      {"role": "user", "content": user}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return resp.choices[0].message.content
-    except Exception:  # noqa: BLE001 - 网络/限流一律兜底
-        return None
+    """按供应商链调用；空响应与异常都视为失败并落到下一家。"""
+    global _last_provider
+    for provider in provider_chain():
+        kwargs = {"model": provider.model,
+                  "messages": [{"role": "system", "content": system},
+                               {"role": "user", "content": user}],
+                  "temperature": temperature,
+                  "max_tokens": max(int(max_tokens), provider.min_max_tokens)}
+        if provider.session_header:
+            kwargs["extra_headers"] = {"x-opencode-session": config.OPENCODE_SESSION}
+        try:
+            resp = _client(provider.api_key,
+                           provider.base_url).chat.completions.create(**kwargs)
+            content = resp.choices[0].message.content
+        except Exception:  # noqa: BLE001 - 网络/限流一律兜底
+            continue
+        if content and content.strip():
+            _last_provider = provider.name
+            return content
+    return None
 
 
 def adjust_plan_ratio(stats: dict) -> float:
@@ -204,13 +287,13 @@ def generate_talk(subject: str, entries: list[dict]) -> str | None:
 
 
 async def stream_answer(question: str, context_text: str):
-    client = get_async_client()
+    client, model, extra = chat_target()
     if client is None:
-        yield "AI 助手未配置（缺少 DeepSeek key），请到「我的」页配置后重试。"
+        yield "AI 助手未配置（缺少 LLM key），请到「我的」页配置后重试。"
         return
     try:
         stream = await client.chat.completions.create(
-            model=config.DEEPSEEK_MODEL,
+            model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_COACH
                  + " 只能基于提供的资料回答，不确定就明说；引用条目时标注其 ID。"},
@@ -218,6 +301,7 @@ async def stream_answer(question: str, context_text: str):
             ],
             stream=True,
             temperature=0.3,
+            extra_headers=extra or None,
         )
         async for chunk in stream:
             delta = chunk.choices[0].delta.content

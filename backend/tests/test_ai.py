@@ -11,7 +11,7 @@ def fake_entry():
 
 
 def test_call_llm_returns_none_without_key(monkeypatch):
-    monkeypatch.setattr(ai, "get_client", lambda: None)
+    monkeypatch.setattr(ai, "provider_chain", list)   # 没有可用供应商
     assert ai.call_llm("sys", "user") is None
 
 
