@@ -96,21 +96,24 @@ def snippet(text: str, limit: int = ARTICLE_SNIPPET) -> str:
 
 def pool(conn, *, subjects: list[str] | None = None, mode: str = "read",
          limit: int = 10, unseen_only: bool = False) -> list[dict]:
-    """法条卡池：未看过/未听过的排在前面，保证多次取队列可穷尽全部法条题。"""
+    """法条卡池：未看过/未听过的排前面，`subjects` 只是**偏好**（不排除其他科目），
+    这样今日科目优先的同时，任何一天都能逐步覆盖到全部法条题。"""
     ensure_table(conn)
     where = [_FILTER]
     # 参数按 SQL 文本中 `?` 出现的顺序绑定：LEFT JOIN 的 mode 在最前
     params: list = [mode, quiz_bank.ORIGIN_BANK, quiz_bank.ORIGIN_JUDGE]
-    if subjects:
-        where.append(f"q.subject IN ({_placeholders(subjects)})")
-        params += list(subjects)
     if unseen_only:
         where.append("cs.card_key IS NULL")
+    order = ["unseen DESC"]
+    if subjects:
+        order.append(f"(q.subject IN ({_placeholders(subjects)})) DESC")
+        params += list(subjects)
+    order.append("q.id")
     sql = (
         "SELECT q.id, q.subject, q.qtype, q.stem, q.options, q.answer, q.analysis,"
         " q.basis, (cs.card_key IS NULL) AS unseen FROM quizzes q"
         " LEFT JOIN card_seen cs ON cs.card_key = 'q:' || q.id AND cs.mode = ?"
-        f" WHERE {' AND '.join(where)} ORDER BY unseen DESC, q.id"
+        f" WHERE {' AND '.join(where)} ORDER BY {', '.join(order)}"
         + (" LIMIT ?" if limit else ""))
     rows = conn.execute(sql, tuple(params) + ((limit,) if limit else ())).fetchall()
     library = statute_index.load_library(config.STATUTE_DIR)

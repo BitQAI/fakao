@@ -103,6 +103,17 @@ def test_by_article_and_listen_text(tmp_db, tmp_path, monkeypatch):
     conn.close()
 
 
+def test_subject_filter_is_only_a_preference(tmp_db, tmp_path, monkeypatch):
+    """今日科目优先但不能锁死覆盖：偏好的科目没题时仍返回其他科目。"""
+    _prepare(tmp_path, monkeypatch)
+    conn = db.connect(tmp_db[0])
+    _seed(conn)
+    cards = statute_cards.pool(conn, subjects=["民法"], limit=10)
+    assert len(cards) == 3                       # 全是刑法题，也照样返回
+    assert {c["subject"] for c in cards} == {"刑法"}
+    conn.close()
+
+
 def test_stats_reports_pool_and_progress(tmp_db, tmp_path, monkeypatch):
     _prepare(tmp_path, monkeypatch)
     conn = db.connect(tmp_db[0])
