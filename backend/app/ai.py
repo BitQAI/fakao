@@ -98,15 +98,32 @@ def generate_evening_report(stats: dict) -> str:
     return (text or "").strip() or template
 
 
+def _quiz_brief(entry: dict) -> str:
+    """把条目要点拼成出题依据：场景 + 结论 + 易错提示 + 法条。"""
+    lines = [
+        f"科目：{entry.get('subject') or ''}",
+        f"子科目：{entry.get('submodule') or ''}",
+        f"考点：{entry.get('point') or ''}",
+        f"场景：{entry.get('anchor') or ''}",
+        f"结论：{entry.get('conclusion') or ''}",
+    ]
+    if entry.get("note"):
+        lines.append(f"易错提示：{entry['note']}")
+    statutes = [s for s in (entry.get("statutes") or []) if s]
+    if statutes:
+        lines.append("法条：" + "、".join(statutes))
+    return "\n".join(lines)
+
+
 def generate_quiz(entry: dict) -> dict | None:
     text = call_llm(
         SYSTEM_COACH,
-        "根据该条目出一道法考客观题（题干用场景，正确项来自结论句，"
+        "根据下面这条法考考点条目出一道客观题（题干用条目场景，正确项来自结论句，"
         "干扰项来自易混淆情形）。约 1/3 出多选题（答案 2~3 个字母），其余单选。"
         "必须附带 30~60 字解析。只输出 JSON："
         '{"qtype": "choice"|"multi", "stem": "...", '
         '"options": ["A. ...", "B. ...", "C. ...", "D. ..."], '
-        '"answer": "A"|"AB", "analysis": "..."}',
+        '"answer": "A"|"AB", "analysis": "..."}\n\n条目：\n' + _quiz_brief(entry),
         temperature=0.5,
         max_tokens=400,
     )
