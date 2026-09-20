@@ -23,12 +23,13 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=str(config.DATA_DIR / "quiz_bank"))
     ap.add_argument("--origins", default="bank,judge")
     ap.add_argument("--statuses", default="published")
+    ap.add_argument("--db", default=None, help="数据库路径（默认 data/fakao.db）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
     origins = tuple(x.strip() for x in args.origins.split(",") if x.strip())
     statuses = tuple(x.strip() for x in args.statuses.split(",") if x.strip())
-    conn = db.connect()
+    conn = db.connect(args.db)
     result = quiz_bank_io.export(conn, Path(args.out), origins, statuses,
                                  dry_run=args.dry_run)
     conn.close()

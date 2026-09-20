@@ -37,6 +37,7 @@ def main(argv=None) -> int:
                     help="题库 JSON 文件或目录（默认 ../data/quiz_bank）")
     ap.add_argument("--replace", action="store_true",
                     help="同 key 但内容不同时覆盖库中已有题（默认只跳过）")
+    ap.add_argument("--db", default=None, help="数据库路径（默认 data/fakao.db）")
     ap.add_argument("--dry-run", action="store_true", help="只统计不写库")
     args = ap.parse_args(argv)
 
@@ -44,7 +45,7 @@ def main(argv=None) -> int:
     if not files:
         print("没有可导入的题库文件")
         return 1
-    conn = None if args.dry_run else db.connect()
+    conn = None if args.dry_run else db.connect(args.db)
     written = skipped = orphan = 0
     for path in files:
         payload = quiz_bank_io.parse(path.read_text(encoding="utf-8"))
