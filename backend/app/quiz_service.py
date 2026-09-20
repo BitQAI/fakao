@@ -6,6 +6,7 @@ import json
 from datetime import date, datetime
 
 from app import ai
+from app import quiz_bank
 from app.service import _entry_by_id, ensure_today_plan, plan_payload
 
 
@@ -46,7 +47,7 @@ def quiz_history(conn, limit: int = 50) -> list[dict]:
     rows = conn.execute(
         """
         SELECT qa.id AS answer_id, qa.quiz_id, qa.ts, qa.user_answer, qa.correct,
-               q.entry_id, q.qtype, q.stem, q.options, q.answer, q.analysis
+               q.entry_id, q.qtype, q.stem, q.options, q.answer, q.analysis, q.basis
         FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id
         ORDER BY qa.ts DESC, qa.id DESC LIMIT ?
         """,
@@ -70,7 +71,7 @@ def quiz_history(conn, limit: int = 50) -> list[dict]:
             "ts": r["ts"], "user_answer": picked,
             "picked_texts": picked_texts, "correct": bool(r["correct"]),
             "qtype": r["qtype"], "stem": r["stem"], "options": options,
-            "answer": r["answer"], "analysis": analysis,
+            "answer": r["answer"], "analysis": analysis, "basis": r["basis"] or "",
         })
     conn.commit()
     return out
@@ -112,8 +113,12 @@ def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict
 
 
 def _quiz_for_entry(conn, entry: dict, day: str) -> dict:
-    """取/建当日题目：当日已有缓存直接复用，避免重复耗 LLM。"""
+    """取/建题目：优先题库已发布题，其次当日缓存，最后才现生成（省 LLM）。"""
     entry_id = entry["id"]
+    banked = quiz_bank.question_for_entry(conn, entry_id)
+    if banked is not None:
+        banked["analysis"] = ensure_quiz_analysis(conn, banked)
+        return banked
     cached = conn.execute(
         "SELECT id, qtype, stem, options, answer, analysis FROM quizzes "
         "WHERE entry_id=? AND date(created_at)=?", (entry_id, day)
@@ -135,6 +140,16 @@ def _quiz_for_entry(conn, entry: dict, day: str) -> dict:
          datetime.now().isoformat(timespec="seconds")),
     )
     return {**quiz, "id": cur.lastrowid, "entry_id": entry_id}
+
+
+def judge_quiz(conn, subjects: list[str] | None = None,
+               points: list[str] | None = None, limit: int = 10) -> dict:
+    """数字判断专项：从 judge 题库抽题（只取已发布题）。"""
+    questions = quiz_bank.pick(
+        conn, origins=(quiz_bank.ORIGIN_JUDGE,), limit=limit,
+        subjects=subjects, points=points, qtypes=["judge"],
+    )
+    return {"questions": questions, "total": len(questions)}
 
 
 def custom_quiz(conn, subjects: list[str], points: list[str],

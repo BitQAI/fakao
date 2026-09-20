@@ -115,15 +115,21 @@ def _quiz_brief(entry: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_quiz(entry: dict) -> dict | None:
+def generate_quiz(entry: dict, peers: list[dict] | None = None) -> dict | None:
+    """按条目出客观题；peers 为同章易混条目，用于设计干扰项。"""
+    brief = _quiz_brief(entry)
+    if peers:
+        brief += "\n同章易混考点（干扰项素材，不得作为正确答案）：\n" + "\n".join(
+            f"- {p.get('point', '')}：{p.get('conclusion', '')}" for p in peers[:6])
     text = call_llm(
         SYSTEM_COACH,
         "根据下面这条法考考点条目出一道客观题（题干用条目场景，正确项来自结论句，"
         "干扰项来自易混淆情形）。约 1/3 出多选题（答案 2~3 个字母），其余单选。"
-        "必须附带 30~60 字解析。只输出 JSON："
+        "必须附带 30~60 字解析与法条依据字段 basis（无明确法条则空串）。只输出 JSON："
         '{"qtype": "choice"|"multi", "stem": "...", '
         '"options": ["A. ...", "B. ...", "C. ...", "D. ..."], '
-        '"answer": "A"|"AB", "analysis": "..."}\n\n条目：\n' + _quiz_brief(entry),
+        '"answer": "A"|"AB", "analysis": "...", "basis": "刑诉法第91条"}\n\n'
+        "条目：\n" + brief,
         temperature=0.5,
         max_tokens=400,
     )
@@ -146,6 +152,7 @@ def generate_quiz(entry: dict) -> dict | None:
         data["answer"] = "".join(letters)
         data["analysis"] = (data.get("analysis") or "").strip() \
             or f"正确答案：{''.join(letters)}。"
+        data["basis"] = (data.get("basis") or "").strip()
         return data
     except Exception:  # noqa: BLE001
         return None

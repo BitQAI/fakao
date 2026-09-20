@@ -3,12 +3,13 @@ import { useEffect, useState } from "react";
 import { getJson, postJson } from "@/lib/api";
 import { mdToHtml } from "@/lib/md";
 import GroupQuizView from "./GroupQuizView";
+import JudgeQuizView from "./JudgeQuizView";
 import type { QuizHistoryItem, QuizQuestion } from "@/lib/types";
 
 interface AnswerResult { correct: boolean; answer: string; analysis?: string; }
 
 export default function QuizView() {
-  const [view, setView] = useState<"today" | "group" | "history">("today");
+  const [view, setView] = useState<"today" | "group" | "judge" | "history">("today");
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
   const [history, setHistory] = useState<QuizHistoryItem[] | null>(null);
   const [idx, setIdx] = useState(0);
@@ -63,6 +64,15 @@ export default function QuizView() {
       <div>
         <QuizSegments view={view} setView={setView} />
         <GroupQuizView />
+      </div>
+    );
+  }
+
+  if (view === "judge") {
+    return (
+      <div>
+        <QuizSegments view={view} setView={setView} />
+        <JudgeQuizView />
       </div>
     );
   }
@@ -138,6 +148,11 @@ export default function QuizView() {
                       );
                     })}
                   </div>
+                ) : item.qtype === "judge" ? (
+                  <p className="muted">
+                    你的答案：{item.user_answer || "—"} · 正确答案：{item.answer}
+                    {item.basis ? ` · 依据 ${item.basis}` : ""}
+                  </p>
                 ) : (
                   <p className="muted">自评：{item.correct ? "答对了" : "答错了"} · 正确答案：{item.answer}</p>
                 )}
@@ -313,8 +328,8 @@ export default function QuizView() {
 function QuizSegments({
   view, setView,
 }: {
-  view: "today" | "group" | "history";
-  setView: (v: "today" | "group" | "history") => void;
+  view: "today" | "group" | "judge" | "history";
+  setView: (v: "today" | "group" | "judge" | "history") => void;
 }) {
   return (
     <div className="segments quiz-segments">
@@ -322,6 +337,8 @@ function QuizSegments({
         onClick={() => setView("today")}>今日</button>
       <button className={`segment${view === "group" ? " active" : ""}`}
         onClick={() => setView("group")}>组卷</button>
+      <button className={`segment${view === "judge" ? " active" : ""}`}
+        onClick={() => setView("judge")}>数判</button>
       <button className={`segment${view === "history" ? " active" : ""}`}
         onClick={() => setView("history")}>历史</button>
     </div>

@@ -149,12 +149,16 @@ export interface StatsOverview {
 
 export interface QuizQuestion {
   id: number;
-  entry_id: string;
-  qtype: "choice" | "cloze";
+  entry_id: string | null;
+  qtype: "choice" | "cloze" | "judge";
   stem: string;
   options: string[];
   answer: string;
   analysis?: string;
+  /** 法条依据（题库题专用，如「刑诉法91条」） */
+  basis?: string;
+  subject?: string;
+  point?: string;
 }
 
 export interface QuizHistoryItem {
@@ -164,11 +168,12 @@ export interface QuizHistoryItem {
   user_answer: string;
   picked_texts: string[];
   correct: boolean;
-  qtype: "choice" | "cloze";
+  qtype: "choice" | "cloze" | "judge";
   stem: string;
   options: string[];
   answer: string;
   analysis: string;
+  basis?: string;
 }
 
 export interface CoveragePoint {
