@@ -72,6 +72,11 @@ sudo ufw allow 80/tcp
 
 - 今日：看倒计时、早报、今日计划与入口
 - 学习：看背（翻卡自评）/ 听学（白天挂着听）/ 自测（每日 10 题）
+- 学习 → 案例：主观题模块（按真实卷面 5 道大题组织）
+  - 今日案例：微主观题（第 2/3/5 题练习），写要点或只听，听完必须勾采分点
+  - 论述题：第 1 题习近平法治思想，材料驱动，600 字以上；提交后给字数与「照搬材料」检查
+  - 综合大案例：第 4 题民法＋民诉＋商法，8—13 小问，采分点按小问分组勾选
+  - 复盘池：按采分点聚合的未命中点，反复踩同一个点才算真薄弱
 - 报告：晚报复盘与覆盖树
 - 我的：考试日期、每日上限、数据导入、DeepSeek 状态
 - AI 助手：右下悬浮钮随时提问，看背卡片内可针对当前考点提问
@@ -82,6 +87,20 @@ sudo ufw allow 80/tcp
 cd backend && .venv/bin/uvicorn app.main:app --port 8000
 cd frontend && npm run dev   # /api 自动代理到 8000
 ```
+
+### 主观题题库生成（在 `backend/` 下执行）
+
+```bash
+.venv/bin/python scripts/build_case_questions.py --subject 刑法 --limit 5   # 案例分析
+.venv/bin/python scripts/build_essay_questions.py --list                    # 论述题候选专题
+.venv/bin/python scripts/build_essay_questions.py --topic 依宪治国          # 生成论述题
+.venv/bin/python scripts/build_composite_questions.py --limit 2             # 综合大案例
+```
+
+产物入库为 `draft`，人工抽检后加 `--publish`（只发布该题型）转为 `published`。
+
+**判分口径**：采分点出自裁判理由或备考资料原文，用户逐条勾「我写到了吗」计分，
+**不让 LLM 评判主观文字**；论述题另加两项确定性检查——字数是否达标、是否大段照搬材料。
 
 ## 验收清单
 

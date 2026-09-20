@@ -100,6 +100,39 @@ CREATE TABLE IF NOT EXISTS marks (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_marks_entry ON marks(entry_id, created_at);
+
+-- 每日案例（微主观题）：题干 + 设问 + 采分点，由 scripts/build_case_questions.py 生成
+CREATE TABLE IF NOT EXISTS case_questions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_source TEXT NOT NULL,
+  case_loc    TEXT NOT NULL,
+  subject     TEXT NOT NULL,
+  qtype       TEXT NOT NULL DEFAULT 'case'
+              CHECK(qtype IN ('case','essay','composite')),
+  stem        TEXT NOT NULL,
+  questions   TEXT NOT NULL DEFAULT '[]',
+  points      TEXT NOT NULL DEFAULT '[]',
+  materials   TEXT NOT NULL DEFAULT '[]',
+  reference   TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'draft'
+              CHECK(status IN ('draft','published')),
+  created_at  TEXT NOT NULL,
+  UNIQUE(case_source, case_loc)
+);
+CREATE INDEX IF NOT EXISTS idx_case_questions_status
+  ON case_questions(status, subject, id);
+
+CREATE TABLE IF NOT EXISTS case_attempts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  question_id  INTEGER NOT NULL REFERENCES case_questions(id),
+  ts           TEXT NOT NULL,
+  mode         TEXT NOT NULL CHECK(mode IN ('write','listen')),
+  answer_text  TEXT,
+  hit_points   TEXT NOT NULL DEFAULT '[]',
+  score        INTEGER NOT NULL DEFAULT 0,
+  duration_sec INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_case_attempts_q ON case_attempts(question_id, ts);
 """
 
 
@@ -116,6 +149,15 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(quizzes)").fetchall()}
     if "analysis" not in cols:
         conn.execute("ALTER TABLE quizzes ADD COLUMN analysis TEXT NOT NULL DEFAULT ''")
+    # 存量库补齐 case_questions.qtype / materials（论述题与综合大案例复用同一张表）
+    cq_cols = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(case_questions)").fetchall()}
+    if cq_cols and "qtype" not in cq_cols:
+        conn.execute("ALTER TABLE case_questions ADD COLUMN qtype TEXT "
+                     "NOT NULL DEFAULT 'case'")
+    if cq_cols and "materials" not in cq_cols:
+        conn.execute("ALTER TABLE case_questions ADD COLUMN materials TEXT "
+                     "NOT NULL DEFAULT '[]'")
     conn.commit()
     return conn
 

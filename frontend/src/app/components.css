@@ -673,3 +673,85 @@
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
   margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--glass-border);
 }
+
+/* 每日案例（微主观题） */
+.case-view { display: flex; flex-direction: column; gap: 10px; }
+.case-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.case-head .muted { font-size: 12px; }
+.case-stem { font-size: 14px; line-height: 1.75; }
+.case-stem p { margin: 0 0 8px; }
+.case-questions { margin: 0; padding-left: 1.2em; }
+.case-questions li { margin: 6px 0; }
+.case-input {
+  width: 100%; border: 1px solid var(--glass-border); border-radius: 14px;
+  padding: 12px; font-size: 14px; line-height: 1.7; background: var(--glass-soft);
+  color: var(--ink); outline: none; resize: vertical;
+}
+.case-input:focus { border-color: var(--primary); }
+.case-missed {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--glass-border);
+}
+.case-missed p { margin: 0 0 6px; font-size: 14px; line-height: 1.65; }
+
+/* 作答骨架：只提示结构，不自动填充 */
+.case-skeleton {
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 12px; padding: 10px 12px; font-size: 13px;
+}
+.case-skeleton summary { cursor: pointer; color: var(--primary); font-weight: 600; }
+.case-skeleton ol { margin: 8px 0 0; padding-left: 1.2em; line-height: 1.7; }
+.case-skeleton li { margin: 4px 0; color: var(--muted); }
+
+/* 采分点维度标签与按维度得分 */
+.kind-badge {
+  display: inline-block; margin-right: 6px; padding: 1px 7px;
+  border-radius: 999px; font-size: 11px; font-weight: 600;
+  color: var(--primary); background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+}
+.kind-stats { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.kind-stat {
+  font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--glass-border); color: var(--muted);
+  background: var(--glass-soft);
+}
+.kind-stat.full { color: var(--primary); border-color: rgba(37, 99, 235, 0.35); }
+.case-review { display: flex; flex-direction: column; gap: 10px; }
+.case-miss-card p { margin: 6px 0 0; font-size: 14px; line-height: 1.65; }
+
+/* 论述题材料：材料一/二/三分块，与题干区分开 */
+.case-materials { display: flex; flex-direction: column; gap: 8px; }
+.case-material {
+  border: 1px solid var(--glass-border); border-left: 3px solid var(--primary);
+  border-radius: 12px; padding: 10px 12px; background: var(--glass-soft);
+}
+.material-label {
+  display: inline-block; font-size: 12px; font-weight: 600; color: var(--primary);
+  margin-bottom: 4px;
+}
+.case-material p { margin: 0; font-size: 14px; line-height: 1.75; }
+
+/* 论述题实时字数：达标变绿 */
+.char-count { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.char-count.ok { color: var(--primary); font-weight: 600; }
+
+/* 综合大案例：采分点按小问分组 + 未命中点的小问标记 */
+.case-check { display: flex; flex-direction: column; gap: 8px; }
+.check-group { display: flex; flex-direction: column; gap: 4px; }
+.point-group {
+  margin: 10px 0 2px; font-size: 13px; font-weight: 600; color: var(--primary);
+}
+.qno-tag {
+  display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+}
+
+/* 论述题形式检查（字数/照搬） */
+.case-result { display: flex; flex-direction: column; gap: 10px; }
+.essay-check.warn { border-color: rgba(239, 68, 68, 0.35); }
+.essay-metrics { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; font-size: 13px; }
+.essay-metrics .ok { color: var(--primary); font-weight: 600; }
+.essay-metrics .bad { color: var(--bad); font-weight: 600; }
+.essay-verdict { margin: 4px 0 0; padding-left: 1.2em; font-size: 13px; color: var(--bad); }
