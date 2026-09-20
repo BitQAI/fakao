@@ -36,3 +36,7 @@ data/案例数据/
 
 # 案例库统一全文文档（可由 Task 0 脚本再生成；index.csv 入库）
 data/案例库统一/documents/
+
+# 法条原文投递目录（原始文件只留本地；normalize_statutes.py 归一后入库）
+data/法条库/_inbox/*
+!data/法条库/_inbox/README.md

@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { IconMine, IconReport, IconStudy } from "./icons";
+import { IconLaw, IconMine, IconReport, IconStudy } from "./icons";
 
 const TABS = [
   { href: "/study", label: "学习", Icon: IconStudy },
+  { href: "/statutes", label: "法条", Icon: IconLaw },
   { href: "/report", label: "报告", Icon: IconReport },
   { href: "/settings", label: "我的", Icon: IconMine },
 ];

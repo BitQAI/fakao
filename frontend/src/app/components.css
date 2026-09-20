@@ -214,6 +214,22 @@
 .option-mark.bad { background: var(--bad); }
 
 /* 自定义范围选择器 */
+.search-bar {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 10px;
+}
+.search-input {
+  flex: 1; min-width: 0; border: 1px solid var(--glass-border); border-radius: 12px;
+  padding: 10px 12px; font-size: 15px; background: var(--glass-soft);
+  color: var(--ink); outline: none;
+}
+.search-input:focus { border-color: var(--primary); }
+.search-clear {
+  flex: none; width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.search-hint { flex: none; font-size: 12px; color: var(--muted); }
+.search-empty { margin: 6px 0 0; }
 .pick-mode { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 8px; }
 .pick-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 8px; }
 .pick-item {
@@ -604,3 +620,56 @@
   border-radius: 14px; padding: 14px; margin-top: 8px; width: 100%;
 }
 .speed-conclusion h3 { margin: 8px 0 0; line-height: 1.55; }
+
+/* 法条检索与阅读 */
+.statute-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.statute-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  border-radius: 14px; padding: 12px 14px; font-size: 14px; color: var(--ink);
+}
+.statute-row-col { flex-direction: column; align-items: stretch; gap: 5px; }
+.statute-row:active { border-color: var(--primary); background: rgba(37, 99, 235, 0.10); }
+.statute-row-name { font-weight: 600; }
+.statute-hit-head { font-size: 13px; color: var(--primary); font-weight: 600; }
+.statute-hit-body { font-size: 13px; line-height: 1.55; color: var(--muted); }
+.statute-mark {
+  background: rgba(37, 99, 235, 0.20); color: inherit;
+  border-radius: 3px; padding: 0 2px;
+}
+.statute-reader { margin-top: 10px; }
+.statute-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 16px;
+}
+.statute-chapter {
+  position: sticky; top: 0; z-index: 2; margin: 14px 0 6px;
+  padding: 6px 10px; border-radius: 10px; font-size: 13px; color: var(--muted);
+  background: var(--glass-soft); border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+}
+.statute-item {
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 12px; margin-bottom: 6px; overflow: hidden;
+}
+.statute-item-head {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
+  border: 0; background: transparent; color: var(--ink);
+  padding: 10px 12px; font-size: 14px; cursor: pointer;
+}
+.statute-no { flex: none; font-weight: 600; }
+.statute-no-arabic { flex: none; font-size: 11px; color: var(--muted); }
+.statute-preview {
+  flex: 1; min-width: 0; color: var(--muted); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.statute-item-head:active { background: rgba(37, 99, 235, 0.08); }
+.statute-body { padding: 0 12px 12px; }
+.statute-line { margin: 6px 0; font-size: 14px; line-height: 1.7; }
+.statute-line-item { margin: 6px 0 6px 1em; font-size: 14px; line-height: 1.7; }
+.statute-refs {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--glass-border);
+}

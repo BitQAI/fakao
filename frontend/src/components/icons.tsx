@@ -27,6 +27,18 @@ export function IconReport({ size = 21 }: IconProps) {
   );
 }
 
+export function IconLaw({ size = 21 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M12 3v18" />
+      <path d="M5 7h14" />
+      <path d="M7 7l-3 7h6z" />
+      <path d="M17 7l-3 7h6z" />
+      <path d="M8 21h8" />
+    </svg>
+  );
+}
+
 export function IconMine({ size = 21 }: IconProps) {
   return (
     <svg {...base(size)}>

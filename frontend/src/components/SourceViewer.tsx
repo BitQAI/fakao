@@ -16,6 +16,12 @@ function splitStatute(s: string): { law: string; no: string } {
   return { law: m[1], no: `${m[2]}条${m[3]}` };
 }
 
+/** 从条号里取阿拉伯数字，供法条页锚点定位；中文条号或缺失时返回 null。 */
+function articleNumber(no: string): string | null {
+  const m = no.match(/^(\d+)条/);
+  return m ? m[1] : null;
+}
+
 interface SourceData {
   kind: "case" | "file";
   title: string;
@@ -63,6 +69,17 @@ export default function SourceViewer({
           <button onClick={onClose}>×</button>
         </div>
         <div className="source-body">
+          {statute && (() => {
+            const { law, no } = splitStatute(statute as string);
+            const num = articleNumber(no);
+            const href = `/statutes?law=${encodeURIComponent(law)}`
+              + (num ? `&no=${num}` : "");
+            return (
+              <a className="chip" href={href} style={{ marginBottom: 10 }}>
+                在法条库中打开全文 →
+              </a>
+            );
+          })()}
           {loading && <p className="muted">加载中…</p>}
           {error && <p className="bad">原文不可用：{error}</p>}
           {data && (
