@@ -44,6 +44,10 @@ def _entry_dict(r) -> dict:
         "cases": json.loads(r["cases"] or "[]"),
         "statutes": json.loads(r["statutes"] or "[]"), "note": r["note"],
         "tts_text": r["tts_text"],
+        # 法条题卡（kind='card'）专用：选项与条文摘要；正式条目为默认值
+        "kind": (r["kind"] if "kind" in r.keys() else "entry") or "entry",
+        "options": json.loads((r["options"] if "options" in r.keys() else None) or "[]"),
+        "article_text": (r["article_text"] if "article_text" in r.keys() else "") or "",
     }
 
 
@@ -76,6 +80,47 @@ def _recent_daily_counts(conn, day: str) -> list[int]:
     return [r["n"] for r in rows]
 
 
+def entry_states(conn, day: str, exclude_ids: set[str] | None = None):
+    """全部 final 条目（含法条题卡）的学习状态，供今日计划与续学共用。
+
+    卡片条目化后池子有 3 万+ 条：评阅信息改由「按 entry_id 聚合的两条小查询」提供，
+    避免原来逐行相关子查询（实测从 4.2s 降到亚秒级）。
+    """
+    review_rows = conn.execute(
+        """
+        SELECT r.entry_id AS entry_id,
+               MAX(r.ts) AS last_ts,
+               COUNT(CASE WHEN r.mode='read' THEN 1 END) AS read_cnt,
+               (SELECT r2.result FROM reviews r2 WHERE r2.entry_id=r.entry_id
+                ORDER BY r2.ts DESC LIMIT 1) AS last_result
+        FROM reviews r GROUP BY r.entry_id
+        """
+    ).fetchall()
+    reviews = {r["entry_id"]: r for r in review_rows}
+    wrong_ids = {r["entry_id"] for r in conn.execute(
+        "SELECT DISTINCT q.entry_id AS entry_id FROM quiz_answers qa"
+        " JOIN quizzes q ON qa.quiz_id=q.id"
+        " WHERE qa.correct=0 AND q.entry_id IS NOT NULL")}
+
+    states = []
+    for r in conn.execute(
+        "SELECT id, subject, submodule, point, priority FROM entries"
+        " WHERE status='final'"
+    ):
+        if exclude_ids and r["id"] in exclude_ids:
+            continue
+        agg = reviews.get(r["id"])
+        st = scheduler.classify(
+            r["id"], r["subject"], r["submodule"], r["point"], r["priority"],
+            agg["last_ts"] if agg else None,
+            agg["last_result"] if agg else None,
+            r["id"] in wrong_ids, day,
+            int(agg["read_cnt"] or 0) if agg else 0)
+        if st is not None:
+            states.append(st)
+    return states
+
+
 def ensure_today_plan(conn, day: str | None = None) -> dict:
     day = day or date.today().isoformat()
     existing = conn.execute("SELECT date FROM daily_plans WHERE date=?",
@@ -83,29 +128,7 @@ def ensure_today_plan(conn, day: str | None = None) -> dict:
     if existing:
         return plan_payload(conn, day)
 
-    rows = conn.execute(
-        """
-        SELECT e.id, e.subject, e.submodule, e.point, e.priority,
-               (SELECT r.ts FROM reviews r WHERE r.entry_id=e.id
-                ORDER BY r.ts DESC LIMIT 1) AS last_ts,
-               (SELECT r.result FROM reviews r WHERE r.entry_id=e.id
-                ORDER BY r.ts DESC LIMIT 1) AS last_result,
-               EXISTS(SELECT 1 FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id
-                      WHERE q.entry_id=e.id AND qa.correct=0) AS wrong_ever,
-               (SELECT COUNT(*) FROM reviews r WHERE r.entry_id=e.id
-                AND r.mode='read') AS read_cnt
-        FROM entries e WHERE e.status='final'
-        """
-    ).fetchall()
-
-    states = []
-    for r in rows:
-        st = scheduler.classify(r["id"], r["subject"], r["submodule"], r["point"],
-                                r["priority"], r["last_ts"], r["last_result"],
-                                bool(r["wrong_ever"]), day,
-                                int(r["read_cnt"] or 0))
-        if st is not None:
-            states.append(st)
+    states = entry_states(conn, day)
 
     cap_max = int(get_setting(conn, "capacity_max", "50") or "50")
     capacity = scheduler.compute_capacity(_recent_daily_counts(conn, day), cap_max)
@@ -168,31 +191,8 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
     day = date.today().isoformat()
     plan = plan_payload(conn, day)
     plan_ids = {it["id"] for it in plan["items"]}
-    rows = conn.execute(
-        """
-        SELECT e.id, e.subject, e.submodule, e.point, e.priority,
-               (SELECT r.ts FROM reviews r WHERE r.entry_id=e.id
-                ORDER BY r.ts DESC LIMIT 1) AS last_ts,
-               (SELECT r.result FROM reviews r WHERE r.entry_id=e.id
-                ORDER BY r.ts DESC LIMIT 1) AS last_result,
-               EXISTS(SELECT 1 FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id
-                      WHERE q.entry_id=e.id AND qa.correct=0) AS wrong_ever,
-               (SELECT COUNT(*) FROM reviews r WHERE r.entry_id=e.id
-                AND r.mode='read') AS read_cnt
-        FROM entries e WHERE e.status='final'
-        """
-    ).fetchall()
+    states = entry_states(conn, day, exclude_ids=plan_ids)
     bucket_rank = {"retry": 0, "review": 1, "new": 2}
-    states = []
-    for r in rows:
-        if r["id"] in plan_ids:
-            continue
-        st = scheduler.classify(r["id"], r["subject"], r["submodule"], r["point"],
-                                r["priority"], r["last_ts"], r["last_result"],
-                                bool(r["wrong_ever"]), day,
-                                int(r["read_cnt"] or 0))
-        if st is not None:
-            states.append(st)
     states.sort(key=lambda s: (
         bucket_rank[s.bucket],
         s.read_count,
@@ -223,17 +223,23 @@ def continue_plan_entries(conn, count: int = 5) -> list[dict]:
 def custom_entries(conn, subjects: list[str] | None = None,
                    points: list[str] | None = None, limit: int | None = None,
                    listen_only: bool = False,
-                   exclude: list[str] | None = None) -> list[dict]:
+                   exclude: list[str] | None = None,
+                   kinds: list[str] | None = None,
+                   laws: list[str] | None = None) -> list[dict]:
     """自定义学习范围：科目/知识点并集过滤，优先级×科目顺序排序。
 
     limit 仅作安全上限；调用方如需分批取数，可自行按返回列表切片并传 exclude。
+    kinds=['entry'|'card'] 只取对应类型（默认都取）；laws 按「法条主名」（题卡的
+    submodule）过滤，供只看某几部法的题卡。
 
     排序：读/听次数少优先 → 优先级 → 科目顺序 → id
     """
     subjects = [s for s in (subjects or []) if s]
     points = [p for p in (points or []) if p]
     exclude = [x for x in (exclude or []) if x]
-    if not subjects and not points:
+    kinds = [k for k in (kinds or []) if k in {"entry", "card"}]
+    laws = [x for x in (laws or []) if x]
+    if not subjects and not points and not laws:
         return []
     union = []
     if subjects:
@@ -247,10 +253,14 @@ def custom_entries(conn, subjects: list[str] | None = None,
         conds.append("e.tts_text != ''")
     if exclude:
         conds.append(f"e.id NOT IN ({','.join('?' * len(exclude))})")
+    if kinds:
+        conds.append(f"e.kind IN ({','.join('?' * len(kinds))})")
+    if laws:
+        conds.append(f"e.submodule IN ({','.join('?' * len(laws))})")
     sql = "SELECT * FROM entries e WHERE e.status='final'"
     if conds:
         sql += " AND " + " AND ".join(conds)
-    rows = conn.execute(sql, subjects + points + exclude).fetchall()
+    rows = conn.execute(sql, subjects + points + exclude + kinds + laws).fetchall()
     items = [_entry_dict(r) for r in rows]
     # 批量附加 read_count / listen_count
     items = review_stats.attach_read_counts(conn, items)
@@ -318,7 +328,7 @@ def _search_entries(conn, question: str, limit: int = 5) -> list[dict]:
         return []
     conds = " OR ".join(["point LIKE ?"] * len(tokens))
     rows = conn.execute(
-        f"SELECT * FROM entries WHERE {conds} LIMIT ?",
+        f"SELECT * FROM v_entries WHERE {conds} LIMIT ?",
         (*[f"%{t}%" for t in tokens], limit),
     ).fetchall()
     return [_entry_dict(r) for r in rows]
@@ -389,17 +399,19 @@ def _sort_listen_items(items: list[dict]) -> list[dict]:
     return [t[0] for t in never + heard]
 
 
-def _listen_pool(conn, exclude: set[str] | None = None):
+def _listen_pool(conn, exclude: set[str] | None = None, limit: int | None = None):
     """听学池排序（未听过优先；已听按听过次数少优先、同次数则越久未听越优先），可排除 id 集合。
 
     返回 (items, remaining)，每条 item 附 listen_count / last_ts / listened_today 供前端标记已听。
+    卡片条目化后池子有 3 万+ 条：先按轻量字段排序，再取前 `limit` 条补全正文，
+    避免每次听学请求把整库 tts_text 拉进内存。
     """
     exclude = exclude or set()
     rows = conn.execute(
         """
-        SELECT e.*,
+        SELECT e.id, e.subject, e.priority,
                (SELECT COUNT(*) FROM reviews r
-                WHERE r.entry_id=e.id AND r.mode='listen') AS listen_cnt,
+                WHERE r.entry_id=e.id AND r.mode='listen') AS listen_count,
                (SELECT MAX(r.ts) FROM reviews r
                 WHERE r.entry_id=e.id AND r.mode='listen') AS last_ts
         FROM entries e
@@ -412,15 +424,28 @@ def _listen_pool(conn, exclude: set[str] | None = None):
           AND NOT EXISTS (SELECT 1 FROM reviews r
                           WHERE r.entry_id=e.id AND r.mode='listen')
         """).fetchone()["n"]
+    light = [{"id": r["id"], "subject": r["subject"], "priority": r["priority"],
+              "listen_count": r["listen_count"], "last_ts": r["last_ts"]}
+             for r in rows if r["id"] not in exclude]
+    ordered = _sort_listen_items(light)
+    if limit:
+        ordered = ordered[:limit]
+    ids = [x["id"] for x in ordered]
+    by_id: dict[str, dict] = {}
+    if ids:
+        placeholders = ",".join("?" * len(ids))
+        for r in conn.execute(
+            f"SELECT * FROM entries WHERE id IN ({placeholders})", ids
+        ).fetchall():
+            by_id[r["id"]] = _entry_dict(r)
     items: list[dict] = []
-    for r in rows:
-        if r["id"] in exclude:
+    for x in ordered:
+        e = by_id.get(x["id"])
+        if e is None:
             continue
-        e = _entry_dict(r)
-        e["listen_count"] = r["listen_cnt"]
-        e["last_ts"] = r["last_ts"]
+        e["listen_count"] = x["listen_count"]
+        e["last_ts"] = x["last_ts"]
         items.append(e)
-    items = _sort_listen_items(items)
     items = review_stats.attach_listened_today(conn, items)
     items = review_stats.attach_reviewed_today(conn, items)
     return items, remaining
@@ -428,33 +453,42 @@ def _listen_pool(conn, exclude: set[str] | None = None):
 
 def listen_queue(conn, limit: int = 10) -> dict:
     """听学池：未听过优先，已听按最近听过倒序；返回已听标记与累计进度。"""
-    items, remaining = _listen_pool(conn)
     try:
         limit = int(limit)
     except (TypeError, ValueError):
         limit = 10
     limit = min(max(limit, 1), 500)
-    slice_items = items[:limit]
+    items, remaining = _listen_pool(conn, limit=limit)
     heard_total = conn.execute(
         """
         SELECT COUNT(DISTINCT r.entry_id) AS n
         FROM reviews r JOIN entries e ON e.id = r.entry_id
         WHERE r.mode='listen' AND e.status='final' AND e.tts_text != ''
         """).fetchone()["n"]
-    return {"items": slice_items, "remaining": remaining,
+    return {"items": items, "remaining": remaining,
             "heard_total": heard_total}
 
 
 def listen_more(conn, exclude: list[str], count: int = 5) -> dict:
     """听学续学：返回当前队列之外的下 N 条（同一排序）。"""
-    items, remaining = _listen_pool(conn, set(exclude or []))
-    slice_items = items[:count]
-    return {"items": slice_items, "remaining": remaining}
+    items, remaining = _listen_pool(conn, set(exclude or []), limit=count)
+    return {"items": items, "remaining": remaining}
 
 
 def ensure_listen_pool(conn, threshold: int = 50) -> bool:
-    """剩余可听数低于阈值时触发后台生成；返回是否触发。"""
-    if listen_queue(conn, limit=1)["remaining"] >= threshold:
+    """正式条目（不含法条题卡）的剩余可听数低于阈值时触发后台生成。
+
+    卡片是题库派生的固定素材，不参与「内容生成」判断，否则 1.3 万张卡片会让
+    续批生成永远不触发；UI 的「剩余可听」仍按含卡片的完整池展示。
+    """
+    pending = conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM v_entries e
+        WHERE e.status='final' AND e.tts_text != ''
+          AND NOT EXISTS (SELECT 1 FROM reviews r
+                          WHERE r.entry_id=e.id AND r.mode='listen')
+        """).fetchone()["n"]
+    if pending >= threshold:
         return False
     return generator.ensure_generation(conn)
 
@@ -472,6 +506,10 @@ def update_entry_text(conn, entry_id: str, fields: dict) -> tuple[dict | None, s
                        (entry_id,)).fetchone()
     if row is None:
         return None, "条目不存在"
+    if conn.execute("SELECT kind FROM entries WHERE id=?",
+                    (entry_id,)).fetchone()["kind"] == "card":
+        # 卡片文本由题库同步生成（scripts/sync_card_entries.py），就地改写会被覆盖
+        return None, "法条题卡由题库同步生成，不支持就地更正"
     point = (fields.get("point") or "").strip()
     anchor = (fields.get("anchor") or "").strip()
     conclusion = (fields.get("conclusion") or "").strip()

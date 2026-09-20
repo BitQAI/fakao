@@ -256,7 +256,7 @@ def entry_candidates(conn, limit: int) -> list[dict]:
     """条目侧候选：结论里含数字表达的核心考点。"""
     rows = conn.execute(
         "SELECT id, subject, submodule, point, anchor, conclusion, statutes"
-        " FROM entries WHERE status='final'").fetchall()
+        " FROM v_entries WHERE status='final'").fetchall()
     out = []
     for r in rows:
         text = f"{r['conclusion']}"
@@ -299,7 +299,7 @@ def counterpart_candidates(conn, limit: int = 0) -> list[dict]:
     for entry_id in sorted(true_entry - false_entry):
         row = conn.execute(
             "SELECT id, subject, submodule, point, anchor, conclusion, statutes"
-            " FROM entries WHERE id=?", (entry_id,)).fetchone()
+            " FROM v_entries WHERE id=?", (entry_id,)).fetchone()
         if row is None:
             continue
         out.append({"entry_id": row["id"], "subject": row["subject"],

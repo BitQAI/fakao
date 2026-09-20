@@ -21,7 +21,7 @@ WORKERS = 3
 
 
 def _entries(conn, ids: list[str] | None):
-    sql = ("SELECT id, tts_text FROM entries WHERE status='final' AND tts_text != ''")
+    sql = ("SELECT id, tts_text FROM v_entries WHERE status='final' AND tts_text != ''")
     params: tuple = ()
     if ids:
         sql += " AND id IN (%s)" % ",".join("?" * len(ids))

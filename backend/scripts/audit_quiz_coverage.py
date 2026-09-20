@@ -31,7 +31,7 @@ def judge_verification(conn) -> dict:
     strict_fail, loose_pass, failed = [], [], []
     for row in rows:
         if row["entry_id"]:
-            entry = conn.execute("SELECT anchor, conclusion FROM entries WHERE id=?",
+            entry = conn.execute("SELECT anchor, conclusion FROM v_entries WHERE id=?",
                                  (row["entry_id"],)).fetchone()
             reference = f"{entry['anchor']}。{entry['conclusion']}" if entry else ""
             mode = "entry"

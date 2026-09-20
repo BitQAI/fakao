@@ -22,6 +22,10 @@ class CustomRangeIn(BaseModel):
     points: list[str] = []
     limit: int = Field(default=200, ge=1, le=500)
     exclude: list[str] = []
+    #: 内容类型：空=条目与题卡都要；["entry"] 只要正式条目；["card"] 只要法条题卡
+    kinds: list[str] = []
+    #: 按法条主名（题卡的 submodule）过滤，供「只看某几部法的题卡」
+    laws: list[str] = []
 
 
 @router.get("/entries/{entry_id}")
@@ -51,10 +55,8 @@ def update_entry(entry_id: str, payload: UpdateEntryIn, conn=Depends(db.get_db))
 
 @router.get("/plans/today")
 def get_today_plan(conn=Depends(db.get_db)):
-    """今日计划 + 看背用的法条卡（每 3 张留 1 张，未看过优先）。"""
-    payload = service.ensure_today_plan(conn, date.today().isoformat())
-    payload["statute_cards"] = statute_cards.for_plan(conn, payload, mode="read")
-    return payload
+    """今日计划：正式条目与法条题卡在同一条队列里，按优先级排序（无额外注入）。"""
+    return service.ensure_today_plan(conn, date.today().isoformat())
 
 
 @router.post("/plans/generate")
@@ -67,12 +69,10 @@ def regenerate_plan(conn=Depends(db.get_db)):
 
 @router.get("/listen")
 def listen(limit: int = 10, conn=Depends(db.get_db)):
-    """听学队列：条目音频 + 每 3 段留 1 段法条题卡（音频按需合成）。"""
+    """听学队列：正式条目与法条题卡同一条队列（未听优先 → 优先级 → 科目），音频按需合成。"""
     limit = min(max(int(limit), 1), 50)
     data = service.listen_queue(conn, limit=limit)
     data["generating"] = service.ensure_listen_pool(conn)
-    data["statute_cards"] = statute_cards.pool(
-        conn, mode="listen", limit=max(1, limit // 3))
     return data
 
 
@@ -90,7 +90,8 @@ def listen_more(payload: ListenMoreIn, conn=Depends(db.get_db)):
 def custom_plan(payload: CustomRangeIn, conn=Depends(db.get_db)):
     items = service.custom_entries(
         conn, payload.subjects, payload.points,
-        listen_only=False, exclude=payload.exclude)
+        listen_only=False, exclude=payload.exclude,
+        kinds=payload.kinds, laws=payload.laws)
     return {"items": items[:payload.limit], "total": len(items)}
 
 
@@ -98,7 +99,8 @@ def custom_plan(payload: CustomRangeIn, conn=Depends(db.get_db)):
 def custom_listen(payload: CustomRangeIn, conn=Depends(db.get_db)):
     items = service.custom_entries(
         conn, payload.subjects, payload.points,
-        listen_only=True, exclude=payload.exclude)
+        listen_only=True, exclude=payload.exclude,
+        kinds=payload.kinds, laws=payload.laws)
     limit = min(payload.limit, 100)
     heard_total = conn.execute(
         """

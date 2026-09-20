@@ -22,7 +22,7 @@ SAMPLE_PER_KIND = 15
 
 def _rows(conn):
     return conn.execute(
-        "SELECT id, tts_text FROM entries WHERE status='final' AND tts_text != ''"
+        "SELECT id, tts_text FROM v_entries WHERE status='final' AND tts_text != ''"
         " ORDER BY id").fetchall()
 
 

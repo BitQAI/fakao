@@ -28,7 +28,7 @@ def main(argv=None) -> int:
             retries = int(a.split("=", 1)[1])
 
     conn = db.connect()
-    sql = "SELECT id, tts_text FROM entries WHERE status='final' AND tts_text != ''"
+    sql = "SELECT id, tts_text FROM v_entries WHERE status='final' AND tts_text != ''"
     params: tuple = ()
     if only_id:
         sql += " AND id=?"

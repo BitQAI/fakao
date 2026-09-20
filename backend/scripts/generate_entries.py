@@ -67,7 +67,7 @@ def uncovered_blocks(subject: str,
     if entries is None:
         conn = db.connect()
         rows = conn.execute(
-            "SELECT sources FROM entries WHERE subject=? AND status='final'",
+            "SELECT sources FROM v_entries WHERE subject=? AND status='final'",
             (subject,)).fetchall()
         conn.close()
         entries = [{"sources": json.loads(r["sources"])} for r in rows]

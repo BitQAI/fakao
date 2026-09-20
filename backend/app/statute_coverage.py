@@ -49,7 +49,7 @@ def coverage(conn, directory=None) -> list[dict]:
     """返回每部法的覆盖率统计（按覆盖率升序，缺口大的在前）。"""
     library = statute_index.load_library(directory or config.STATUTE_DIR)
     cited = _refs((r["statutes"] for r in conn.execute(
-        "SELECT statutes FROM entries WHERE status='final'")), "statutes")
+        "SELECT statutes FROM v_entries WHERE status='final'")), "statutes")
     covered = _refs((r["basis"] for r in conn.execute(
         "SELECT basis FROM quizzes WHERE basis != '' AND status='published'")),
         "basis")

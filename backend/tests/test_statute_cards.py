@@ -103,6 +103,26 @@ def test_by_article_and_listen_text(tmp_db, tmp_path, monkeypatch):
     conn.close()
 
 
+def test_judge_questions_only_in_quiz_pool(tmp_db, tmp_path, monkeypatch):
+    """判断题不进看背 / 听学（用户 2026-09-20 口径），自测与法条页仍可用。"""
+    _prepare(tmp_path, monkeypatch)
+    conn = db.connect(tmp_db[0])
+    _seed(conn)
+    judge_id = quiz_bank.save_question(
+        conn, qtype="judge", origin=quiz_bank.ORIGIN_JUDGE, entry_id=None,
+        subject="刑法", stem="刑法第一条是关于立法目的的规定。", options=[],
+        answer="对", analysis="依据原文。", basis="中华人民共和国刑法第一条",
+        status="published")
+
+    for mode in ("read", "listen"):
+        ids = {c["quiz_id"] for c in statute_cards.pool(conn, mode=mode, limit=10)}
+        assert judge_id not in ids
+    assert judge_id in {c["quiz_id"]
+                        for c in statute_cards.pool(conn, mode="quiz", limit=10)}
+    assert len(statute_cards.by_article(conn, "中华人民共和国刑法", 1, 0)) == 2
+    conn.close()
+
+
 def test_subject_filter_is_only_a_preference(tmp_db, tmp_path, monkeypatch):
     """今日科目优先但不能锁死覆盖：偏好的科目没题时仍返回其他科目。"""
     _prepare(tmp_path, monkeypatch)

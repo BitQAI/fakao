@@ -264,7 +264,7 @@ def entries_for(conn, law_key: str, no: int) -> list[dict]:
     if not clauses:
         return []
     rows = conn.execute(
-        "SELECT id, subject, submodule, point, priority FROM entries "
+        "SELECT id, subject, submodule, point, priority FROM v_entries "
         f"WHERE status='final' AND ({' OR '.join(clauses)}) "
         "ORDER BY subject, id", params).fetchall()
     return [{"id": r["id"], "subject": r["subject"],

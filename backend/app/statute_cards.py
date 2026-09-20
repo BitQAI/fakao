@@ -88,6 +88,21 @@ _COLS = "id, subject, qtype, stem, options, answer, analysis, basis"
 _FILTER = ("origin IN (?,?) AND status='published' AND entry_id IS NULL"
            " AND basis != ''")
 
+#: 各入口允许的题目来源：看背 / 听学只练**客观题**（判断题不进这两个入口），
+#: 自测与法条页仍含判断题（数字判断专项与关系型判断题各有自己的入口）。
+ORIGINS_BY_MODE = {
+    "read": (quiz_bank.ORIGIN_BANK,),
+    "listen": (quiz_bank.ORIGIN_BANK,),
+    "quiz": (quiz_bank.ORIGIN_BANK, quiz_bank.ORIGIN_JUDGE),
+}
+
+
+def card_from_row(row, library: dict | None = None) -> dict:
+    """公开入口：quizzes 行 → 法条卡 dict（同步脚本与看背/听学共用同一份结构）。"""
+    if library is None:
+        library = statute_index.load_library(config.STATUTE_DIR)
+    return _to_card(row, library)
+
 
 def snippet(text: str, limit: int = ARTICLE_SNIPPET) -> str:
     flat = " ".join((text or "").split())
@@ -99,9 +114,11 @@ def pool(conn, *, subjects: list[str] | None = None, mode: str = "read",
     """法条卡池：未看过/未听过的排前面，`subjects` 只是**偏好**（不排除其他科目），
     这样今日科目优先的同时，任何一天都能逐步覆盖到全部法条题。"""
     ensure_table(conn)
-    where = [_FILTER]
+    origins = ORIGINS_BY_MODE.get(mode, ORIGINS_BY_MODE["quiz"])
+    where = [f"origin IN ({_placeholders(origins)}) AND status='published'"
+             " AND entry_id IS NULL AND basis != ''"]
     # 参数按 SQL 文本中 `?` 出现的顺序绑定：LEFT JOIN 的 mode 在最前
-    params: list = [mode, quiz_bank.ORIGIN_BANK, quiz_bank.ORIGIN_JUDGE]
+    params: list = [mode, *origins]
     if unseen_only:
         where.append("cs.card_key IS NULL")
     order = ["unseen DESC"]
@@ -168,20 +185,3 @@ def stats(conn) -> dict:
         "SELECT COUNT(*) c FROM card_seen WHERE mode=?", (mode,)).fetchone()["c"]
         for mode in MODES}
     return {"total": total, "seen": seen}
-
-
-def for_plan(conn, plan: dict, mode: str = "read") -> list[dict]:
-    """按今日计划配额取法条卡：每 3 张留 1 张，科目跟随今日计划，未看过优先。"""
-    quota = max(1, (plan.get("quota") or 0) // 3)
-    focus = list(dict.fromkeys(
-        it["subject"] for it in plan.get("items", []) if it.get("subject")))
-    return pool(conn, subjects=focus or None, mode=mode, limit=quota)
-
-
-def card_by_id(conn, quiz_id: int) -> dict | None:
-    """按 quiz_id 取一张法条卡（听学音频按需合成时用）。"""
-    row = conn.execute(f"SELECT {_COLS} FROM quizzes WHERE id=?",
-                       (quiz_id,)).fetchone()
-    if row is None:
-        return None
-    return _to_card(row, statute_index.load_library(config.STATUTE_DIR))

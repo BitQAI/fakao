@@ -74,7 +74,7 @@ def cited_counter(conn) -> collections.Counter:
     """条目 statutes 引用计数：{(法条库主名, 条号, 子条号): 被引用条目数}。"""
     counter: collections.Counter = collections.Counter()
     for row in conn.execute(
-            "SELECT statutes FROM entries WHERE status='final'"):
+            "SELECT statutes FROM v_entries WHERE status='final'"):
         for ref in json.loads(row["statutes"] or "[]"):
             located = statutes.resolve_law_article(ref)
             if located:

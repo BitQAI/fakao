@@ -26,7 +26,7 @@ MIN_ANALYSIS = 10
 def entries_to_process(conn, subject: str | None, priority: str | None,
                        only_missing: bool, limit: int) -> list[dict]:
     sql = ("SELECT id, subject, submodule, point, anchor, conclusion, note, statutes,"
-           " priority FROM entries WHERE status='final'")
+           " priority FROM v_entries WHERE status='final'")
     params: list = []
     if subject:
         sql += " AND subject=?"
@@ -48,7 +48,7 @@ def entries_to_process(conn, subject: str | None, priority: str | None,
 def peers_for(conn, entry: dict) -> list[dict]:
     """同 submodule 的其他条目（供设计干扰项）。"""
     rows = conn.execute(
-        "SELECT point, conclusion FROM entries WHERE status='final'"
+        "SELECT point, conclusion FROM v_entries WHERE status='final'"
         " AND subject=? AND submodule=? AND id!=? LIMIT 6",
         (entry["subject"], entry["submodule"], entry["id"])).fetchall()
     return [dict(r) for r in rows]

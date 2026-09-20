@@ -36,7 +36,7 @@ def coverage_payload(conn) -> dict:
         "EXISTS(SELECT 1 FROM reviews r WHERE r.entry_id=e.id) "
         " OR EXISTS(SELECT 1 FROM quiz_answers qa JOIN quizzes q ON qa.quiz_id=q.id "
         " WHERE q.entry_id=e.id) AS has_record "
-        "FROM entries e"
+        "FROM v_entries e"
     ).fetchall()
     items = [
         {"subject": r["subject"], "submodule": r["submodule"],

@@ -113,7 +113,7 @@ def import_payload(conn, payload: dict, replace: bool = False) -> dict:
     """
     origin = payload["origin"]
     subject = payload.get("subject", "")
-    entry_ids = {r["id"] for r in conn.execute("SELECT id FROM entries")}
+    entry_ids = {r["id"] for r in conn.execute("SELECT id FROM v_entries")}
     written = skipped = orphan = 0
     for item in payload.get("items", []):
         entry_id = item.get("entry_id") or None
