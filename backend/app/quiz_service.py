@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 from app import ai
 from app import quiz_bank
+from app import statute_cards
 from app.service import _entry_by_id, ensure_today_plan, plan_payload
 
 
@@ -18,7 +19,21 @@ def record_quiz_answer(conn, quiz_id: int, user_answer: str, correct: bool,
         (quiz_id, datetime.now().isoformat(timespec="seconds"),
          user_answer, int(correct), duration_sec),
     )
+    row = conn.execute("SELECT entry_id FROM quizzes WHERE id=?",
+                       (quiz_id,)).fetchone()
+    if row is not None and row["entry_id"] is None:
+        statute_cards.mark_seen(conn, quiz_id, "quiz")   # 练过的法条题排到队尾
     conn.commit()
+
+
+def _card_to_question(conn, card: dict) -> dict:
+    """法条卡 → 答题接口的题目结构（entry_id 为空，basis 供前端显示依据）。"""
+    quiz = {"id": card["quiz_id"], "entry_id": None, "subject": card["subject"],
+            "point": "", "qtype": card["qtype"], "stem": card["stem"],
+            "options": card["options"], "answer": card["answer"],
+            "analysis": card["analysis"], "basis": card["basis"], "variant": ""}
+    quiz["analysis"] = ensure_quiz_analysis(conn, quiz)
+    return quiz
 
 
 def ensure_quiz_analysis(conn, quiz: dict, persist: bool = True) -> str:
@@ -78,6 +93,10 @@ def quiz_history(conn, limit: int = 50) -> list[dict]:
 
 
 def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict]:
+    """今日自测：条目题为主，每 3 题留 1 题给法条驱动题（未练过优先）。
+
+    法条驱动题（entry_id 为空）此前只能靠「组卷」遇到，这里让每日必修路径也覆盖它们。
+    """
     day = day or date.today().isoformat()
     ensure_today_plan(conn, day)
     plan = plan_payload(conn, day)
@@ -89,18 +108,20 @@ def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict
             "WHERE qa.correct=0 AND q.entry_id IS NOT NULL"
         ).fetchall()
     ]
+    statute_quota = limit // 3
+    entry_slots = max(1, limit - statute_quota)
     selected: list[str] = []
-    n_today = round(limit * 0.7)
+    n_today = round(entry_slots * 0.7)
     selected += [i for i in today_ids if i not in selected][:n_today]
     selected += [i for i in wrong_ids
                  if i not in selected and i not in today_ids]
-    if len(selected) < limit:
+    if len(selected) < entry_slots:
         for i in today_ids:
-            if len(selected) >= limit:
+            if len(selected) >= entry_slots:
                 break
             if i not in selected:
                 selected.append(i)
-    selected = selected[:limit]
+    selected = selected[:entry_slots]
 
     out = []
     for entry_id in selected:
@@ -108,6 +129,12 @@ def build_daily_quiz(conn, day: str | None = None, limit: int = 10) -> list[dict
         if entry is None:
             continue
         out.append(_quiz_for_entry(conn, entry, day))
+    if len(out) < limit and statute_quota:
+        focus = list(dict.fromkeys(
+            it["subject"] for it in plan["items"] if it.get("subject")))
+        for card in statute_cards.pool(conn, subjects=focus or None, mode="quiz",
+                                       limit=limit - len(out)):
+            out.append(_card_to_question(conn, card))
     conn.commit()
     return out
 

@@ -109,5 +109,6 @@ def test_stats_reports_pool_and_progress(tmp_db, tmp_path, monkeypatch):
     ids = _seed(conn)
     statute_cards.mark_seen(conn, ids[0], "listen")
     assert statute_cards.stats(conn) == {"total": 3,
-                                         "seen": {"read": 0, "listen": 1}}
+                                         "seen": {"read": 0, "listen": 1,
+                                                  "quiz": 0}}
     conn.close()

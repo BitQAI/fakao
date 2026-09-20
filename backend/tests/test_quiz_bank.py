@@ -146,6 +146,38 @@ def test_daily_quiz_falls_back_when_bank_empty(tmp_db, monkeypatch):
     conn.close()
 
 
+def test_daily_quiz_reserves_quota_for_statute_questions(tmp_db, monkeypatch):
+    """今日自测每 3 题留 1 题给法条驱动题，且答过的题排到队尾（可穷尽轮转）。"""
+    monkeypatch.setattr(ai, "call_llm", lambda *a, **k: None)
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn, 6)
+    for i in range(1, 7):
+        quiz_bank.save_question(
+            conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK,
+            entry_id=f"XF-{i:03d}", subject="刑法", point=f"考点{i}",
+            stem=f"条目题{i}", options=["A. 甲", "B. 乙"], answer="A",
+            analysis="解析", status="published")
+    for i in range(3):
+        quiz_bank.save_question(
+            conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK, entry_id=None,
+            subject="刑法", stem=f"法条题{i}", options=["A. 甲", "B. 乙"],
+            answer="A", analysis="解析", basis=f"中华人民共和国刑法第{i + 1}条",
+            status="published")
+
+    questions = quiz_service.build_daily_quiz(conn, "2026-08-27", limit=9)
+    statute = [q for q in questions if not q.get("entry_id")]
+    assert len(questions) == 9
+    assert len(statute) == 3                       # 9 // 3
+    assert all(q["basis"] for q in statute)
+
+    quiz_service.record_quiz_answer(conn, statute[0]["id"], "A", True)
+    again = [q for q in quiz_service.build_daily_quiz(conn, "2026-08-27", limit=9)
+             if not q.get("entry_id")]
+    assert again[-1]["id"] == statute[0]["id"]     # 已练过的排最后
+    conn.close()
+
+
 def test_judge_quiz_picks_only_published_judge(tmp_db):
     db_path, _ = tmp_db
     conn = db.connect(db_path)

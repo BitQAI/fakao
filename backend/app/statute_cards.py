@@ -12,7 +12,8 @@ from app import config, quiz_bank, statute_index, statutes
 #: 卡片正文摘要长度上限（听学朗读与卡片背面共用，超长条文截断）
 ARTICLE_SNIPPET = 160
 
-MODES = ("read", "listen")
+#: read=看背，listen=听学，quiz=自测（作答后标记，用于轮转优先未练过的题）
+MODES = ("read", "listen", "quiz")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS card_seen (
