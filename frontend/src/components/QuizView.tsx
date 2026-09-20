@@ -281,6 +281,16 @@ export default function QuizView() {
               </div>
             )}
           </>
+        ) : q.qtype === "judge" ? (
+          <div className="options-col">
+            <p className="muted">判断下列说法是否正确（法条题会给出依据与条文）。</p>
+            <div className="row">
+              <button className="btn btn-good" disabled={result !== null || submitting}
+                onClick={() => void submit("对")}>对</button>
+              <button className="btn btn-bad" disabled={result !== null || submitting}
+                onClick={() => void submit("错")}>错</button>
+            </div>
+          </div>
         ) : (
           <div className="options-col">
             <p className="muted">在脑子里补全结论，再看答案自评。</p>
