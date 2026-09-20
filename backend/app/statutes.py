@@ -100,7 +100,16 @@ STATUTE_ALIASES = {
     "醉驾意见": "最高人民法院、最高人民检察院、公安部、司法部关于办理醉酒危险驾驶刑事案件的意见",
     "性侵害未成年人案件办理规定（2023年）":
         "最高人民法院、最高人民检察院、公安部、司法部关于办理性侵害未成年人刑事案件的意见",
+    "中华人民共和国民营经济促进法": "民营经济促进法-全文",
 }
+
+#: 文件主名不适合出现在「依据」里的（如带 -全文 后缀），统一在此换成规范法名
+_DISPLAY_NAME_OVERRIDES = {"民营经济促进法-全文": "中华人民共和国民营经济促进法"}
+
+
+def display_law_name(law_key: str) -> str:
+    """法条库文件主名 → 展示/入库用规范法名（能被 _law_candidates 反向解析到）。"""
+    return _DISPLAY_NAME_OVERRIDES.get(law_key, law_key)
 
 #: 条目写法里的限定词后缀，解析失败时逐个剥离后重试（如「公司法（2023）」→「公司法」）
 _QUALIFIER_SUFFIXES = ("（2018年修正）", "（2023修正）", "（2021修正）",
@@ -134,6 +143,9 @@ _ARTICLE_LINE_RE = re.compile(
     r"^\**第(?P<num>[零一二三四五六七八九十百千]+)条"
     r"(?P<sub>之[零一二三四五六七八九十]+)?\**\s*[　 ]?(?P<body>.*)$"
 )
+#: 「一、二、三、」式条文序号：刑法修正案、单行解释等文件不写「第X条」
+_ORDINAL_LINE_RE = re.compile(
+    r"^\**([一二三四五六七八九十]{1,3})、\**\s*(?P<body>.*)$")
 
 _LAW_FILE_CACHE: dict[Path, dict[tuple[int, int], str]] = {}
 _STATUTE_CACHE: dict[str, str | None] = {}
@@ -165,19 +177,45 @@ def _cn2int(s: str) -> int | None:
     return total + num
 
 
+def ordinal_blocks(lines: list[str]) -> dict[tuple[int, int], str]:
+    """按「一、二、三、」序号切分条文：{(条号, 0): 正文}；没有序号行则返回空。
+
+    供刑法修正案、单行解释等「不写第X条」的文件使用（正文含后续段落直到下一条）。
+    """
+    out: dict[tuple[int, int], str] = {}
+    num: int | None = None
+    buf: list[str] = []
+    for line in lines:
+        m = _ORDINAL_LINE_RE.match(line)
+        seq = _cn2int(m.group(1)) if m else None
+        if seq is not None:
+            if num is not None and buf:
+                out[(num, 0)] = "\n".join(buf).strip()
+            num, buf = seq, [m.group("body").strip()]
+        elif num is not None:
+            buf.append(line)
+    if num is not None and buf:
+        out[(num, 0)] = "\n".join(buf).strip()
+    return out
+
+
 def parse_law_file(path: Path) -> dict[tuple[int, int], str]:
     """解析法条库 md：{(条号, 子条号): 条文正文}。"""
     if path in _LAW_FILE_CACHE:
         return _LAW_FILE_CACHE[path]
     articles: dict[tuple[int, int], str] = {}
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
-        m = _ARTICLE_LINE_RE.match(line.strip())
+    lines = [ln.strip() for ln in path.read_text(encoding="utf-8-sig").splitlines()]
+    for line in lines:
+        m = _ARTICLE_LINE_RE.match(line)
         if not m:
             continue
         num = _cn2int(m.group("num"))
         sub = _cn2int(m.group("sub")[1:]) if m.group("sub") else 0
         if num is not None:
             articles[(num, sub)] = m.group("body").strip()
+    if not articles:
+        # 没有「第X条」写法（刑法修正案、单行解释）：退化为「一、二、三、」序号
+        articles.update(ordinal_blocks(lines))
     _LAW_FILE_CACHE[path] = articles
     return articles
 

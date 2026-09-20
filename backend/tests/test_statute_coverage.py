@@ -21,6 +21,15 @@ def test_resolve_law_article_variants():
     assert statutes.resolve_law_article("民法典") is None
 
 
+def test_resolve_law_article_for_amendment_files():
+    """刑法修正案（十二）没有「第X条」写法，按「一、二、三、」序号解析后要能定位。"""
+    key = "中华人民共和国刑法修正案（十二）"
+    assert statutes.resolve_law_article(f"{key}第五条") == (key, 5, 0)
+    assert statutes.resolve_law_article(f"{key}第一条") == (key, 1, 0)
+    body = statutes.resolve_statute(f"{key}第五条")
+    assert body and "行贿罪" in body
+
+
 def test_coverage_counts_cited_and_covered(tmp_path, monkeypatch):
     """覆盖率口径：条文总数 / 被条目引用 / 被题目覆盖。"""
     law_dir = tmp_path / "法条库"

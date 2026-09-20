@@ -109,6 +109,7 @@ def parse_law(path: Path) -> Law:
     buf: list[str] = []
     key: tuple[int, int] | None = None
     head = True
+    lines: list[str] = []
 
     def flush() -> None:
         nonlocal buf, key
@@ -123,6 +124,7 @@ def parse_law(path: Path) -> Law:
         line = raw.strip()
         if not line:
             continue
+        lines.append(line)
         if head and line.startswith("- "):
             meta.update(_split_meta(line))
             continue
@@ -153,6 +155,10 @@ def parse_law(path: Path) -> Law:
         if key is not None:
             buf.append(line)
     flush()
+    if not articles:
+        # 没有「第X条」写法（刑法修正案、单行解释）：退化为「一、二、三、」序号
+        articles = [Article(no, 0, body, ())
+                    for (no, _sub), body in sorted(statutes.ordinal_blocks(lines).items())]
     return Law(key=path.stem, name=name, path=path, meta=meta,
                articles=tuple(articles))
 

@@ -21,8 +21,20 @@ def test_article_blocks_splits_and_filters():
         "第三条　短。\n"
     )
     blocks = bjb.article_blocks(text)
-    assert [no for no, _ in blocks] == ["第二条"]
+    assert [no for no, _ in blocks] == [2]
     assert "七日以内" in blocks[0][1]
+
+
+def test_article_blocks_falls_back_to_ordinals():
+    """刑法修正案/单行解释用「一、二、三、」，没有「第X条」时按序号切分。"""
+    text = (
+        "一、将刑法第三百九十条修改为：“对犯行贿罪的，处三年以下有期徒刑或者拘役。\n"
+        "数额巨大的，处三年以上十年以下有期徒刑。”\n"
+        "二、本修正案自2024年3月1日起施行。\n"
+    )
+    blocks = bjb.article_blocks(text)
+    assert [no for no, _ in blocks] == [1]
+    assert "三年以下有期徒刑" in blocks[0][1]
 
 
 def test_score_prefers_numeric_density():
@@ -44,7 +56,8 @@ def test_statute_candidates_respects_skip(monkeypatch, tmp_path):
     assert len(picked) == 1
     assert picked[0]["law"] == "中华人民共和国刑法"
     assert picked[0]["subject"] == "刑法"
-    assert bjb.statute_candidates(1, skip_basis={"中华人民共和国刑法第八十七条"}) == []
+    covered = {("中华人民共和国刑法", 87, 0)}
+    assert bjb.statute_candidates(1, skip_basis=covered) == []
 
 
 def test_covered_basis_reads_existing_questions(tmp_db):
@@ -66,13 +79,13 @@ def test_covered_basis_reads_existing_questions(tmp_db):
     quiz_bank.save_question(conn, qtype="judge", origin=quiz_bank.ORIGIN_JUDGE,
                             subject="刑法", stem="法定最高刑不满五年，追诉时效为五年。",
                             answer="对", basis="中华人民共和国刑法第八十七条")
-    assert bjb.covered_basis(conn) == {"中华人民共和国刑法第八十七条"}
+    assert bjb.covered_basis(conn) == {("中华人民共和国刑法", 87, 0)}
     conn.close()
     assert json.dumps({})  # 保持 import 语义明确（json 用于其他断言场景）
 
 
 def test_canonical_basis_normalizes_both_forms():
-    """basis 规范成「法条库主名+条号」：兼容「刑诉法91条」与早期的阿拉伯数字后缀写法。"""
+    """basis 规范成「规范法名+条号」：兼容简称与早期的阿拉伯数字后缀写法。"""
     assert bjb.canonical_basis("刑诉法91条") == "中华人民共和国刑事诉讼法第九十一条"
     assert bjb.canonical_basis("中华人民共和国刑法第二百六十九条") == \
         "中华人民共和国刑法第二百六十九条"
@@ -81,6 +94,15 @@ def test_canonical_basis_normalizes_both_forms():
         "中华人民共和国刑事诉讼法第九十一条"
     assert bjb.canonical_basis("不存在的法第9条") is None
     assert bjb.canonical_basis("民法典") is None
+
+
+def test_canonical_basis_uses_display_name_and_is_idempotent():
+    """带 -全文 后缀的法条库主名要换成规范法名，且能被反向解析（覆盖率统计不漏计）。"""
+    expected = "中华人民共和国民营经济促进法第四十一条"
+    assert bjb.canonical_basis("民营经济促进法-全文第四十一条") == expected
+    assert bjb.canonical_basis(expected) == expected
+    from app import statutes
+    assert statutes.resolve_law_article(expected) == ("民营经济促进法-全文", 41, 0)
 
 
 def test_counterpart_candidates_pairs_false_questions(tmp_db):

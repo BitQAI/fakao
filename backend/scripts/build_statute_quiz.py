@@ -6,7 +6,9 @@
   候选 A：条目 statutes 引用过、但还没有任何题目覆盖的条文（按被引用条目数降序）
   候选 B：每部法按 --per-law 配额补足未覆盖条文（数字/要件型条文优先）
 
-产物 basis 统一写成「<法条库文件主名><条号>」规范写法，便于覆盖率统计与法条页跳转。
+产物 basis 统一写成「<规范法名><条号>」（法条库文件主名经 statutes.display_law_name
+换成展示法名，如「民营经济促进法-全文第四十一条」→「中华人民共和国民营经济促进法第四十一条」），
+便于覆盖率统计、去重与法条页跳转。
 
 用法：
     .venv/bin/python scripts/build_statute_quiz.py --dry-run
@@ -105,6 +107,11 @@ def _article(key: str, no: int, sub: int):
     return law.article(no, sub) if law else None
 
 
+def statute_basis(law_key: str, article) -> str:
+    """题目依据写法：「规范法名+条号」（可被 statutes.resolve_law_article 反向解析）。"""
+    return f"{statutes.display_law_name(law_key)}{article.label}"
+
+
 def check_statute_quiz(quiz: dict, article_text: str) -> list[str]:
     """结构校验 + 正确项与条文相关 + 题干不得照抄条文。"""
     errs = check_quiz(quiz, {"conclusion": article_text})
@@ -134,8 +141,9 @@ def build_one(item: dict) -> tuple[dict, dict | None, list[str]]:
     article = _article(item["law"], item["no"], item["sub"])
     if article is None:
         return item, None, ["条文不存在"]
-    basis = f"{item['law']}{article.label}"
-    user = USER_TEMPLATE.format(law=item["law"], label=article.label,
+    law_name = statutes.display_law_name(item["law"])
+    basis = statute_basis(item["law"], article)
+    user = USER_TEMPLATE.format(law=law_name, label=article.label,
                                 text=article.text, basis=basis)
     raw = ai.call_llm(SYSTEM, user, temperature=0.5, max_tokens=700)
     quiz = _parse(raw)
@@ -223,7 +231,7 @@ def main(argv=None) -> int:
                 entry_id=None, subject=subject_of(item["law"]) or "",
                 point="", stem=quiz["stem"], options=quiz["options"],
                 answer=quiz["answer"], analysis=quiz["analysis"],
-                basis=f"{item['law']}{article.label}", status="draft")
+                basis=statute_basis(item["law"], article), status="draft")
             ok += 1
             if i % 25 == 0 or i == len(items):
                 print(f"[{i}/{len(items)}] ok={ok} fail={fail} "

@@ -99,17 +99,31 @@ def subject_of(law: str) -> str | None:
     return None
 
 
-def article_blocks(text: str) -> list[tuple[str, str]]:
-    """切出 [(条号, 正文)]；正文含后续段落直到下一条。"""
+def article_blocks(text: str) -> list[tuple[int, str]]:
+    """切出 [(条号, 正文)]；正文含后续段落直到下一条。
+
+    兼容两种写法：「第X条」（含「第三百九十条」）与刑法修正案、单行解释的
+    「一、二、三、」序号（文件里没有「第X条」时才走序号兜底）。
+    """
     marks = list(_ARTICLE_RE.finditer(text))
-    out: list[tuple[str, str]] = []
+    if not marks:
+        blocks = statutes.ordinal_blocks(
+            [ln.strip() for ln in text.splitlines()])
+        return [(no, body) for (no, _sub), body
+                in sorted(blocks.items()) if _block_ok(body)]
+    out: list[tuple[int, str]] = []
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
-        body = text[m.start(2):end].strip()
-        body = re.sub(r"\s+", "", body)
-        if 20 <= len(body) <= 500:
-            out.append((m.group(1), body))
+        no = statutes._cn2int(m.group(1)[1:-1])
+        body = re.sub(r"\s+", "", text[m.start(2):end].strip())
+        if no is not None and _block_ok(body):
+            out.append((no, body))
     return out
+
+
+def _block_ok(body: str) -> bool:
+    """条文块长度过滤：太短没信息量，太长是切分失败。"""
+    return 20 <= len(body) <= 500
 
 
 #: 真正值得考的「数」类型（排除公布日期、条号等）
@@ -121,7 +135,8 @@ def _score_article(body: str) -> int:
     return sum(1 for _v, unit, _b in number_terms.extract(body) if unit in CORE_UNITS)
 
 
-def statute_candidates(per_law: int, skip_basis: set[str]) -> list[dict]:
+def statute_candidates(per_law: int,
+                       skip_basis: set[tuple[str, int, int]]) -> list[dict]:
     """扫描法条库，按法名配额挑选「含数字表达」的条文（数字密度高者优先）。"""
     picked: list[dict] = []
     for path in sorted(config.STATUTE_DIR.glob("*.md")):
@@ -132,19 +147,30 @@ def statute_candidates(per_law: int, skip_basis: set[str]) -> list[dict]:
         text = path.read_text(encoding="utf-8-sig")
         hits = [(no, body) for no, body in article_blocks(text)
                 if _score_article(body) > 0
-                and f"{law}{no}" not in skip_basis]
+                and not _covered(law, no, skip_basis)]
         hits.sort(key=lambda item: -_score_article(item[1]))
         for no, body in hits[:per_law]:
             picked.append({"law": law, "no": no, "subject": subject, "text": body})
     return picked
 
 
-def covered_basis(conn) -> set[str]:
-    """已出过题的法条（basis 前缀），避免重复出同一考点。"""
+def _covered(law: str, no: int,
+             covered: set[tuple[str, int, int]]) -> bool:
+    """候选条文是否已有题目：按「法条库主名+条号」归一后比对，兼容别名写法的 basis。"""
+    return (law, no, 0) in covered
+
+
+def covered_basis(conn) -> set[tuple[str, int, int]]:
+    """已出过题的法条 {(法条库主名, 条号, 子条号)}，避免重复出同一考点。"""
+    out: set[tuple[str, int, int]] = set()
     rows = conn.execute(
         "SELECT basis FROM quizzes WHERE origin=? AND basis != ''",
         (quiz_bank.ORIGIN_JUDGE,)).fetchall()
-    return {r["basis"] for r in rows}
+    for row in rows:
+        located = statutes.resolve_law_article(row["basis"])
+        if located:
+            out.add(located)
+    return out
 
 
 _BASIS_NO_RE = re.compile(r"第[〇零一二三四五六七八九十百千万0-9]+条.*$")
@@ -153,7 +179,7 @@ _BASIS_INT_SUFFIX_RE = re.compile(r"^(?P<law>.+?)(?P<no>\d+)$")
 
 
 def canonical_basis(basis: str) -> str | None:
-    """把任意写法的 basis 规范成「法条库主名+条号」；解析不到返回 None。"""
+    """把任意写法的 basis 规范成「规范法名+条号」；解析不到返回 None。"""
     located = statutes.resolve_law_article(basis)
     if located is None:
         m = _BASIS_INT_SUFFIX_RE.match(basis or "")
@@ -166,14 +192,19 @@ def canonical_basis(basis: str) -> str | None:
     law_key, no, sub = located
     law = statute_index.load_library().get(law_key)
     article = law.article(no, sub) if law else None
-    return f"{law_key}{article.label}" if article else None
+    if article is None:
+        return None
+    return f"{statutes.display_law_name(law_key)}{article.label}"
 
 
 def fix_subjects(conn) -> int:
-    """按 basis 里的法名重算科目：法条侧题库早期用旧规则，劳动/仲裁类曾误判。"""
+    """按 basis 里的法名重算科目：法条侧题库早期用旧规则，劳动/仲裁类曾误判。
+
+    覆盖所有 entry_id 为空的行，判断题与法条驱动客观题同一口径。
+    """
     rows = conn.execute(
-        "SELECT id, basis, subject FROM quizzes WHERE origin=? AND entry_id IS NULL"
-        " AND basis != ''", (quiz_bank.ORIGIN_JUDGE,)).fetchall()
+        "SELECT id, basis, subject FROM quizzes WHERE entry_id IS NULL"
+        " AND basis != ''").fetchall()
     fixed = 0
     for row in rows:
         law = _BASIS_NO_RE.sub("", row["basis"]).strip()
@@ -189,11 +220,13 @@ def fix_subjects(conn) -> int:
 
 
 def fix_basis(conn) -> int:
-    """把法条侧判断题的 basis 规范成「法条库主名 + 条号」（覆盖率统计/法条跳转依赖它）。"""
-    library = statute_index.load_library()
+    """把法条侧题目的 basis 规范成「规范法名 + 条号」（覆盖率统计/法条跳转依赖它）。
+
+    覆盖所有 entry_id 为空的行：判断题与法条驱动客观题共用同一依据口径。
+    """
     rows = conn.execute(
-        "SELECT id, basis FROM quizzes WHERE origin=? AND entry_id IS NULL",
-        (quiz_bank.ORIGIN_JUDGE,)).fetchall()
+        "SELECT id, basis FROM quizzes WHERE entry_id IS NULL AND basis != ''"
+    ).fetchall()
     fixed = 0
     for row in rows:
         canonical = canonical_basis(row["basis"])
@@ -341,9 +374,9 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--publish", action="store_true")
     ap.add_argument("--fix-subjects", action="store_true",
-                    help="按 basis 里的法名重算科目（法条侧题库科目口径修正）")
+                    help="按 basis 里的法名重算科目（法条侧题库统一口径）")
     ap.add_argument("--fix-basis", action="store_true",
-                    help="把法条侧 basis 规范成「法条库主名+条号」")
+                    help="把法条侧 basis 规范成「规范法名+条号」")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -365,9 +398,10 @@ def main(argv=None) -> int:
 
     items: list[dict] = []
     if args.source in ("statutes", "both"):
-        statutes = statute_candidates(args.per_law, covered_basis(conn))
-        print(f"法条候选 {len(statutes)} 条")
-        items += statutes
+        # 注意：变量名不要用 statutes，否则会遮住 app.statutes（入库时要写法名）
+        statute_items = statute_candidates(args.per_law, covered_basis(conn))
+        print(f"法条候选 {len(statute_items)} 条")
+        items += statute_items
     if args.source in ("entries", "both"):
         entries = entry_candidates(conn, args.limit)
         print(f"条目候选 {len(entries)} 条")
@@ -396,14 +430,15 @@ def main(argv=None) -> int:
                 print(f"[{i}/{len(items)}] FAIL {why} | "
                       f"{(quiz or {}).get('stem', '')[:40]}")
                 continue
-            # 法条侧统一用「法条库主名+条号」的规范写法，便于去重、统计与前端跳转
+            # 法条侧统一用「规范法名+条号」，便于去重、统计与前端跳转
             basis = quiz["basis"]
             if item.get("law"):
                 law = statute_index.load_library().get(item["law"])
                 article = (law.article(item["no"], item.get("sub", 0))
                            if law else None)
                 if article is not None:
-                    basis = f"{item['law']}{article.label}"
+                    basis = (f"{statutes.display_law_name(item['law'])}"
+                             f"{article.label}")
             quiz_bank.save_question(
                 conn, qtype="judge", origin=quiz_bank.ORIGIN_JUDGE,
                 entry_id=item.get("entry_id"), subject=item["subject"],

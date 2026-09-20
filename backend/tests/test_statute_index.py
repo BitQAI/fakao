@@ -60,6 +60,37 @@ def test_multi_paragraph_article_kept(tmp_path):
     assert law.article(2).text.startswith("本法所称合同")
 
 
+AMENDMENT = """# 中华人民共和国示例法修正案（一）
+
+- 公布日期：2026-01-01  施行日期：2026-06-01  效力状态：3  制定机关：全国人民代表大会常务委员会
+- 来源：国家法律法规数据库 flk.npc.gov.cn (bbbs=test)
+
+中华人民共和国示例法修正案（一）
+
+（2026年1月1日第十四届全国人民代表大会常务委员会第一次会议通过）
+
+一、在示例法第一百六十五条中增加一款作为第二款，将该条修改为：“国有公司、企业的董事、
+监事、高级管理人员，利用职务便利获取非法利益，数额巨大的，处三年以下有期徒刑。”
+
+二、将示例法第三百九十条修改为：“对犯行贿罪的，处三年以下有期徒刑或者拘役，并处罚金。”
+
+三、本修正案自2026年6月1日起施行。
+"""
+
+
+def test_ordinal_articles_for_amendment_files(tmp_path):
+    """刑法修正案/单行解释用「一、二、三、」而非「第X条」，也要能被解析成条文。"""
+    (tmp_path / "中华人民共和国示例法修正案（一）.md").write_text(
+        AMENDMENT, encoding="utf-8")
+    statute_index.clear_cache()
+    law = statute_index.load_library(tmp_path)["中华人民共和国示例法修正案（一）"]
+    assert [a.label for a in law.articles] == ["第一条", "第二条", "第三条"]
+    assert "一百六十五条" in law.article(1).text
+    assert "三年以下有期徒刑" in law.article(2).text
+    # 未按「第X条」解析的文件才走序号兜底，正常文件不受影响
+    assert law.article(1).text.count("二、") == 0
+
+
 def test_label_and_int2cn():
     assert statute_index.int2cn(10) == "十"
     assert statute_index.int2cn(21) == "二十一"
