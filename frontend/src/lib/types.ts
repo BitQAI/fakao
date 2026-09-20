@@ -24,6 +24,12 @@ export interface Entry {
   statutes: string[];
   note: string | null;
   tts_text: string;
+  /** entry=正式条目（默认），card=法条题卡（题库派生的客观题） */
+  kind?: "entry" | "card";
+  /** 卡片正面选项（正式条目为空） */
+  options?: string[];
+  /** 卡片背面的条文原文摘要（正式条目为空） */
+  article_text?: string;
   bucket?: "retry" | "review" | "new";
   read_count?: number;
   listen_count?: number;
@@ -38,26 +44,6 @@ export interface Plan {
   rationale: string;
   items: Entry[];
   counts: { retry: number; review: number; new: number };
-  /** 看背用的法条题卡（每 3 张留 1 张，未看过优先） */
-  statute_cards?: StatuteCard[];
-}
-
-/** 法条卡：一条法条 + 基于它命制的题（法条驱动题在四个入口共用） */
-export interface StatuteCard {
-  kind: "statute";
-  quiz_id: number;
-  subject: string;
-  qtype: "choice" | "cloze" | "judge";
-  stem: string;
-  options: string[];
-  answer: string;
-  analysis: string;
-  basis: string;
-  law_key: string;
-  no: number;
-  sub: number;
-  article_text: string;
-  unseen?: boolean;
 }
 
 export interface Stats {
@@ -95,8 +81,24 @@ export interface ListenPayload {
   generating: boolean;
   custom?: boolean;
   heard_total?: number;
-  /** 听学用的法条题卡（每 3 段留 1 段，音频按需合成） */
-  statute_cards?: StatuteCard[];
+}
+
+/** 法条页挂题的题目形状（/api/statute/questions 返回；来自 statute_cards.by_article） */
+export interface StatuteCard {
+  kind: "statute";
+  quiz_id: number;
+  subject: string;
+  qtype: "choice" | "cloze" | "judge";
+  stem: string;
+  options: string[];
+  answer: string;
+  analysis: string;
+  basis: string;
+  law_key: string;
+  no: number;
+  sub: number;
+  article_text: string;
+  unseen?: boolean;
 }
 
 export interface HistoryItem {
@@ -219,3 +221,9 @@ export interface CoverageNode {
 }
 
 export type CoverageTree = Record<string, CoverageNode>;
+
+/** 法条题卡覆盖：科目 → 法条主名 → 题量与未看数（自定义范围选题卡用） */
+export type CardCoverage = Record<string, Record<string, { count: number; unread: number }>>;
+
+/** 自定义范围里的内容类型 */
+export type StudyKind = "entry" | "card";

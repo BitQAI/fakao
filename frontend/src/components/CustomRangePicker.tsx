@@ -2,13 +2,18 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getJson } from "@/lib/api";
+import CardLawPicker from "@/components/CardLawPicker";
 import KeywordSearch from "@/components/KeywordSearch";
 import { matchesKeyword, searchTree, subKey } from "@/lib/pointSearch";
-import type { CoverageTree } from "@/lib/types";
+import type { CardCoverage, CoverageTree, StudyKind } from "@/lib/types";
 
 export interface CustomRange {
   subjects: string[];
   points: string[];
+  /** 空 = 正式条目与法条题卡都要；["entry"] 只要条目；["card"] 只要题卡 */
+  kinds?: StudyKind[];
+  /** 只取这些法条主名的题卡 */
+  laws?: string[];
 }
 
 function TriCheck({
@@ -63,9 +68,12 @@ export default function CustomRangePicker({
   onConfirm: (range: CustomRange) => void;
 }) {
   const [tree, setTree] = useState<CoverageTree | null>(null);
-  const [mode, setMode] = useState<"subject" | "points" | null>(null);
+  const [cardTree, setCardTree] = useState<CardCoverage | null>(null);
+  const [mode, setMode] = useState<"subject" | "points" | "cards" | null>(null);
+  const [kindFilter, setKindFilter] = useState<"all" | StudyKind>("all");
   const [subjects, setSubjects] = useState<Set<string>>(new Set());
   const [points, setPoints] = useState<Set<string>>(new Set());
+  const [laws, setLaws] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
@@ -78,9 +86,14 @@ export default function CustomRangePicker({
     getJson<CoverageTree>("/api/coverage")
       .then((t) => { setTree(t); setError(""); })
       .catch((e) => setError(String(e)));
+    getJson<CardCoverage>("/api/coverage/cards")
+      .then(setCardTree)
+      .catch(() => setCardTree({}));
     setMode(null);
+    setKindFilter("all");
     setSubjects(new Set());
     setPoints(new Set());
+    setLaws(new Set());
     setExpanded(new Set());
     setKeyword("");
   }, [open]);
@@ -108,7 +121,8 @@ export default function CustomRangePicker({
     Object.values(tree[subject].submodules).flatMap((sd) => Object.keys(sd.points));
   const pointsOf = (subject: string, sub: string): string[] =>
     Object.keys(tree[subject].submodules[sub].points);
-  const selectedCount = mode === "subject" ? subjects.size : points.size;
+  const selectedCount = mode === "subject" ? subjects.size
+    : mode === "cards" ? laws.size : points.size;
   const found = searchTree(tree, keyword);
   const shownSubjects = found.active
     ? subjectNames.filter((name) => matchesKeyword(keyword, name))
@@ -125,6 +139,15 @@ export default function CustomRangePicker({
 
   function togglePoint(name: string) {
     setPoints((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  function toggleLaw(name: string) {
+    setLaws((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -162,9 +185,16 @@ export default function CustomRangePicker({
   }
 
   function confirm() {
-    onConfirm(mode === "subject"
-      ? { subjects: Array.from(subjects), points: [] }
-      : { subjects: [], points: Array.from(points) });
+    const kinds: StudyKind[] | undefined = kindFilter === "all" ? undefined : [kindFilter];
+    if (mode === "subject") {
+      onConfirm({ subjects: Array.from(subjects), points: [], kinds });
+      return;
+    }
+    if (mode === "points") {
+      onConfirm({ subjects: [], points: Array.from(points), kinds });
+      return;
+    }
+    onConfirm({ subjects: [], points: [], kinds: ["card"], laws: Array.from(laws) });
   }
 
   function toggleHitPoints() {
@@ -187,6 +217,18 @@ export default function CustomRangePicker({
           <button onClick={onClose}>×</button>
         </div>
         <div className="source-body">
+          <div className="pick-kinds">
+            <span className="muted">内容：</span>
+            {(["all", "entry", "card"] as const).map((k) => (
+              <button key={k} className="badge-btn"
+                style={kindFilter === k
+                  ? { background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" }
+                  : undefined}
+                onClick={() => setKindFilter(k)}>
+                {k === "all" ? "全部" : k === "entry" ? "正式条目" : "法条题卡"}
+              </button>
+            ))}
+          </div>
           {mode === null && (
             <div className="pick-mode">
               <p className="muted">选择学习范围的方式：</p>
@@ -196,13 +238,17 @@ export default function CustomRangePicker({
               <button className="btn" onClick={() => setMode("points")}>
                 按知识点选择（勾选考点）
               </button>
+              <button className="btn" onClick={() => setMode("cards")}>
+                按法条题卡选择（勾选法条）
+              </button>
             </div>
           )}
           {mode !== null && (
             <KeywordSearch
               value={keyword}
               onChange={setKeyword}
-              placeholder={mode === "subject" ? "搜索科目…" : "搜索子模块 / 考点…"}
+              placeholder={mode === "subject" ? "搜索科目…"
+                : mode === "cards" ? "搜索科目 / 法条…" : "搜索子模块 / 考点…"}
               hint={mode === "points" && found.active ? `命中 ${found.total} 个考点` : null}
             />
           )}
@@ -300,6 +346,10 @@ export default function CustomRangePicker({
                 );
               })}
             </div>
+          )}
+          {mode === "cards" && (
+            <CardLawPicker coverage={cardTree ?? {}} laws={laws}
+              onToggle={toggleLaw} keyword={keyword} />
           )}
         </div>
         {mode && (

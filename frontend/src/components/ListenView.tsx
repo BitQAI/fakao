@@ -12,7 +12,10 @@ import { useAiShortcut } from "@/lib/aiShortcut";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 import { ListenMarksPanel } from "./ListenMarksPanel";
-import ListenCardView from "./ListenCardView";
+import ListenSegment from "./listen/ListenSegment";
+import ListenFinishCard from "./listen/ListenFinishCard";
+import { useListenCustom } from "./listen/useListenCustom";
+import { useListenMarked } from "./listen/useListenMarked";
 import { loadListenInitial, LISTEN_PAGE, LISTEN_THRESHOLD } from "@/lib/listenInit";
 
 const QUEUE_STORE_KEY = "fakao.listen.queue.v1";
@@ -21,20 +24,11 @@ export default function ListenView() {
   const searchParams = useSearchParams();
   const [queue, setQueue] = useState<ListenPayload | null>(null);
   const [idx, setIdx] = useState(0);
-  const [cardIdx, setCardIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [deep, setDeep] = useState(false);
   const [heardTotal, setHeardTotal] = useState(0);
-  const [moreCount, setMoreCount] = useState("");
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [marksOpen, setMarksOpen] = useState(false);
-  const [marked, setMarked] = useState<MarkItem[]>([]);
-  const [customRange, setCustomRange] = useState<CustomRange | null>(null);
-  const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
-  const [remaining, setRemaining] = useState(0);
   const [playNonce, setPlayNonce] = useState(0);
   const [listenedToday, setListenedToday] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<SourceTarget | null>(null);
@@ -56,6 +50,16 @@ export default function ListenView() {
 
   // 问 AI 快捷入口 + 历史条数徽标（与看背共用）
   const { askAi, aiLabel } = useAiShortcut(queue?.items[idx] ?? null);
+
+  const custom = useListenCustom({
+    queue, setQueue, heardTotal, setHeardTotal, setIdx, setPlaying,
+    setDeep, setNotice, setListenedToday,
+  });
+  const {
+    customRange, setCustomRange, seenIds, setSeenIds, remaining, setRemaining,
+    loadingMore, moreCount, setMoreCount, pickerOpen, setPickerOpen,
+    applyCustom, loadMore, resetRange,
+  } = custom;
 
   useEffect(() => {
     const entryParam = searchParams.get("entry");
@@ -82,6 +86,8 @@ export default function ListenView() {
       postJson<ListenPayload>("/api/listen/custom", {
         subjects: customMeta.range.subjects,
         points: customMeta.range.points,
+        kinds: customMeta.range.kinds ?? [],
+        laws: customMeta.range.laws ?? [],
         limit: customMeta.limit || LISTEN_PAGE,
         exclude: customMeta.exclude || [],
       }).then((fresh) => {
@@ -105,22 +111,10 @@ export default function ListenView() {
       setDeep(res.deep);
       if (res.customRange) writeListenCustomQueue(res.queue);
     }).catch((e) => setError(String(e)));
-  }, [searchParams]);
+    // setCustomRange/setSeenIds/setRemaining 来自 useListenCustom，均为 useState setter（稳定）
+  }, [searchParams, setCustomRange, setSeenIds, setRemaining]);
 
-  useEffect(() => {
-    getJson<{ items: MarkItem[] }>("/api/marks").then(async (d) => {
-      setMarked(d.items);
-      const legacy = readMarked();
-      const existing = new Set(d.items.map((m) => m.entry_id));
-      const pending = legacy.filter((m) => !existing.has(m.id));
-      if (pending.length) {
-        for (const m of pending) try { await postJson("/api/marks", { entry_id: m.id }); } catch {}
-        writeMarked([]);
-        const fresh = await getJson<{ items: MarkItem[] }>("/api/marks");
-        setMarked(fresh.items);
-      }
-    }).catch(() => {});
-  }, []);
+  const marks = useListenMarked({ onError: setNotice });
 
   useEffect(() => {
     if (!queue || queue.items.length === 0) return;
@@ -160,6 +154,7 @@ export default function ListenView() {
     const job = queue.custom && customRange
       ? postJson<ListenPayload>("/api/listen/custom", {
           subjects: customRange.subjects, points: customRange.points,
+          kinds: customRange.kinds ?? [], laws: customRange.laws ?? [],
           limit: LISTEN_PAGE, exclude: Array.from(new Set(Array.from(seenIds).concat(curIds))),
         }).then((r) => {
           if (!r.items.length) { setRemaining(0); return; }
@@ -189,7 +184,7 @@ export default function ListenView() {
           });
         });
     void job.catch(() => {}).finally(() => { prefetchRef.current = false; setPrefetching(false); });
-  }, [queue, idx, loadingMore, customRange, seenIds, remaining]);
+  }, [queue, idx, loadingMore, customRange, seenIds, remaining, setRemaining, setSeenIds, setHeardTotal, setQueue]);
 
   // 音频预热：提前加载下一条，避免切换时等待合成
   useEffect(() => {
@@ -201,14 +196,12 @@ export default function ListenView() {
     return () => { a.pause(); a.removeAttribute("src"); };
   }, [queue, idx]);
 
-  async function removeMark(m: MarkItem) { try { await delJson(`/api/marks/${m.id}`); setMarked((p) => p.filter((x) => x.id !== m.id)); } catch (e) { setNotice("取消失败：" + String(e)); } }
-  async function clearMarks() { try { await delJson("/api/marks"); setMarked([]); } catch (e) { setNotice("清空失败：" + String(e)); } }
   async function replayMarked(m: MarkItem) {
     setNotice(""); if (!queue) return;
     const inIdx = queue.items.findIndex((i) => i.id === m.entry_id);
     if (inIdx >= 0) setIdx(inIdx);
     else { try { const e = await getJson<Entry>(`/api/entries/${encodeURIComponent(m.entry_id)}`); setQueue((q) => q ? { ...q, items: [e, ...q.items.filter((i) => i.id !== e.id)] } : q); setIdx(0); } catch { setNotice("重背失败：条目不存在或已下架。"); return; } }
-    setPlayNonce((n) => n + 1); setMarksOpen(false);
+    setPlayNonce((n) => n + 1); marks.setMarksOpen(false);
   }
   function viewMarked(m: MarkItem) { window.location.href = `/study?view=read&entry=${encodeURIComponent(m.entry_id)}`; }
 
@@ -218,120 +211,41 @@ export default function ListenView() {
   if (items.length === 0) {
     return (
       <div className="page-box">
-        <div className="card">
-          <p>{queue.generating ? "正在生成更多听学内容…" : "暂无听学内容。"}</p>
-          {queue.remaining === 0 && <p className="muted">剩余不足时系统会自动续批生成。</p>}
+        <ListenFinishCard
+          empty custom={false} itemsCount={0} remaining={0} hasRange={false}
+          queueRemaining={queue.generating ? 1 : queue.remaining}
+          loadingMore={loadingMore} moreCount={moreCount} notice={notice}
+          onCountChange={setMoreCount} onPickRange={() => setPickerOpen(true)}
+          onClearRange={() => {}} onContinueRange={() => {}} onLoadMore={() => {}}>
           <div className="row">
             <button className="btn btn-primary" onClick={() => setPickerOpen(true)}>自定义范围学习</button>
-            <button className="btn" onClick={() => setMarksOpen(true)}>已标记（{marked.length}）</button>
+            <button className="btn" onClick={() => marks.setMarksOpen(true)}>已标记（{marks.marked.length}）</button>
           </div>
-        </div>
-        {marksOpen && <div className="source-modal" onClick={() => setMarksOpen(false)}><div className="source-panel" onClick={(e) => e.stopPropagation()}><ListenMarksPanel marked={marked} onClose={() => setMarksOpen(false)} onRemove={(m) => void removeMark(m)} onReplay={(m) => void replayMarked(m)} onView={viewMarked} onClear={() => void clearMarks()} /></div></div>}
+        </ListenFinishCard>
+        {marks.marksOpen && <div className="source-modal" onClick={() => marks.setMarksOpen(false)}><div className="source-panel" onClick={(e) => e.stopPropagation()}><ListenMarksPanel marked={marks.marked} onClose={() => marks.setMarksOpen(false)} onRemove={(m) => void marks.removeMark(m)} onReplay={(m) => void replayMarked(m)} onView={viewMarked} onClear={() => void marks.clearMarks()} /></div></div>}
         <CustomRangePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onConfirm={(r) => void applyCustom(r)} />
       </div>
     );
   }
 
   const entry: Entry = items[idx];
-  // 每听完 3 段插 1 张法条题卡（队列会自动续批，排到队尾就永远轮不到）
-  const cards = queue.statute_cards ?? [];
-  const dueCards = Math.floor(idx / 3);
-  if (cardIdx < dueCards && cardIdx < cards.length) {
-    return (
-      <div className="page-box">
-        <ListenCardView
-          card={cards[cardIdx]}
-          index={cardIdx}
-          total={cards.length}
-          onNext={() => setCardIdx((i) => i + 1)}
-        />
-      </div>
-    );
-  }
   if (idx >= items.length) {
     return (
       <div className="page-box">
-        <div className="card center">
-          <h2>{queue.custom ? "自定义范围已学完" : "本轮听学完成"}</h2>
-          <p className="muted">共听了 {items.length} 段 · 剩余可听 {queue.remaining}</p>
-          {queue.custom ? (
-            <div>
-              <div className="row"><button className="btn btn-primary" onClick={() => { clearListenCustom(); clearListenCustomQueue(); setPickerOpen(true); }}>重新选择范围</button></div>
-              {customRange && remaining > 0 ? (
-                <div className="continue-box">
-                  <p className="muted">剩余未听 {remaining} 段，选择下一组或部分：</p>
-                  <div className="row">
-                    <button className="btn" disabled={loadingMore} onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: 20 })}>下一组 20</button>
-                    <button className="btn" disabled={loadingMore} onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: 50 })}>下一组 50</button>
-                  </div>
-                  <div className="continue-custom">
-                    <input type="number" min={1} max={50} placeholder="自定义数量" value={moreCount} onChange={(e) => setMoreCount(e.target.value)} />
-                    <button className="btn btn-primary" disabled={loadingMore || !moreCount} onClick={() => void applyCustom(customRange, { exclude: Array.from(seenIds), limit: Number(moreCount) })}>继续</button>
-                  </div>
-                  {notice && <p className="muted">{notice}</p>}
-                </div>
-              ) : <p className="muted">所选范围已全部听完，可重新选择范围。</p>}
-            </div>
-          ) : (
-            <div className="continue-box">
-              <p className="muted">继续听？选择数量：</p>
-              <div className="row">
-                <button className="btn" disabled={loadingMore} onClick={() => void loadMore(5)}>再听 5 段</button>
-                <button className="btn" disabled={loadingMore} onClick={() => void loadMore(10)}>再听 10 段</button>
-              </div>
-              <div className="continue-custom">
-                <input type="number" min={1} max={50} placeholder="自定义数量" value={moreCount} onChange={(e) => setMoreCount(e.target.value)} />
-                <button className="btn btn-primary" disabled={loadingMore || !moreCount} onClick={() => void loadMore(Number(moreCount))}>继续</button>
-              </div>
-              {notice && <p className="muted">{notice}</p>}
-            </div>
-          )}
-        </div>
+        <ListenFinishCard
+          empty={false} custom={Boolean(queue.custom)} itemsCount={items.length}
+          remaining={remaining} queueRemaining={queue.remaining} hasRange={Boolean(customRange)}
+          loadingMore={loadingMore} moreCount={moreCount} notice={notice}
+          onCountChange={setMoreCount} onPickRange={() => setPickerOpen(true)}
+          onClearRange={resetRange}
+          onContinueRange={(limit) => {
+            if (customRange) void applyCustom(customRange, { exclude: Array.from(seenIds), limit });
+          }}
+          onLoadMore={(count) => void loadMore(count)} />
         <SourceViewer source={source} onClose={() => setSource(null)} />
         <CustomRangePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onConfirm={(r) => void applyCustom(r)} />
       </div>
     );
-  }
-
-  async function applyCustom(range: CustomRange, opts?: { exclude?: string[]; limit?: number }) {
-    setLoadingMore(true); setNotice("");
-    try {
-      const exclude = opts?.exclude ?? [];
-      const limit = opts?.limit ?? LISTEN_PAGE;
-      const r = await postJson<ListenPayload>("/api/listen/custom", { subjects: range.subjects, points: range.points, limit, exclude });
-      if (!r.items.length) {
-        if (exclude.length) setRemaining(0);
-        setNotice(exclude.length ? "剩余已全部听完。" : "所选范围暂无听学内容（可能尚未合成音频）。");
-        setPickerOpen(false); return;
-      }
-      setQueue(r); setHeardTotal(r.heard_total ?? heardTotal);
-      const newSeen = new Set([...exclude, ...r.items.map((i) => i.id)]);
-      setSeenIds(newSeen);
-      const newRemaining = Math.max(0, (r.remaining ?? 0) - r.items.length);
-      setRemaining(newRemaining);
-      writeListenCustom({ range, seenIds: Array.from(newSeen), remaining: newRemaining, idx: 0, limit, exclude, ts: Date.now() });
-      writeListenCustomQueue(r);
-      getJson<{ items: { entry_id: string; ts: string }[] }>("/api/reviews/history?mode=listen&limit=500")
-        .then((d) => {
-          const today = new Date().toISOString().slice(0, 10);
-          const todayIds = Array.from(new Set(d.items.filter((it) => it.ts.startsWith(today)).map((it) => it.entry_id)));
-          const newIds = r.items.filter((i) => i.listened_today).map((i) => i.id);
-          setListenedToday(new Set([...todayIds, ...newIds]));
-        }).catch(() => setListenedToday(new Set(r.items.filter((i) => i.listened_today).map((i) => i.id))));
-      setCustomRange(range); setDeep(false); setIdx(0); setPlaying(false); setPickerOpen(false);
-    } catch (e) { setNotice("加载失败：" + String(e)); } finally { setLoadingMore(false); }
-  }
-
-  async function loadMore(count: number) {
-    if (count < 1 || count > 50) return;
-    setLoadingMore(true); setNotice("");
-    try {
-      const r = await postJson<ListenPayload>("/api/listen/more", { count, exclude: items.map((i) => i.id) });
-      if (!r.items.length) { setNotice("没有更多听学内容了。"); return; }
-      setQueue((q) => (q ? { ...q, items: [...q.items, ...r.items], remaining: r.remaining } : q));
-      setListenedToday((prev) => { const next = new Set(prev); r.items.forEach((it) => { if ((it as any).listened_today) next.add(it.id); }); return next; });
-      setIdx(items.length); setPlaying(false);
-    } catch (e) { setNotice("加载失败：" + String(e)); } finally { setLoadingMore(false); setMoreCount(""); }
   }
 
   function clearStallTimer() {
@@ -398,59 +312,67 @@ export default function ListenView() {
   }
   function next() { markExposed(); if (idx + 1 < items.length) setIdx(idx + 1); else { setIdx(items.length); setPlaying(false); } }
   function prev() { markExposed(); if (idx > 0) setIdx(idx - 1); }
-  const isMarked = marked.some((m) => m.entry_id === entry.id);
-  async function toggleMark() {
-    if (isMarked) {
-      const m = marked.find((x) => x.entry_id === entry.id); if (!m) return;
-      try { await delJson(`/api/marks/${m.id}`); setMarked((p) => p.filter((x) => x.id !== m.id)); } catch (e) { setNotice("取消失败：" + String(e)); }
-    } else {
-      try { await postJson("/api/marks", { entry_id: entry.id }); const fresh = await getJson<{ items: MarkItem[] }>("/api/marks"); setMarked(fresh.items); } catch (e) { setNotice("标记失败：" + String(e)); }
-    }
-  }
+  const isMarked = marks.isMarked(entry.id);
   return (
     <div className="page-box">
       <div className="mode-row">
         <button className="btn btn-ghost mode-btn" onClick={() => setPickerOpen(true)}>自定义范围</button>
-        {queue.custom && <button className="btn btn-ghost mode-btn" onClick={() => { clearListenCustom(); clearListenCustomQueue(); setPickerOpen(true); }}>重新选择</button>}
-        <button className="btn btn-ghost mode-btn" onClick={() => setMarksOpen(true)}>已标记（{marked.length}）</button>
+        {queue.custom && <button className="btn btn-ghost mode-btn" onClick={() => { resetRange(); setPickerOpen(true); }}>重新选择</button>}
+        <button className="btn btn-ghost mode-btn" onClick={() => marks.setMarksOpen(true)}>已标记（{marks.marked.length}）</button>
       </div>
       {notice && <p className="muted">{notice}</p>}
       {deep && idx === 0 && <p className="muted">已定位到目标条目，可先听该条，其余按队列继续。</p>}
-      <div className="card center">
-        <h2>{entry.subject} · {entry.point}{isMarked && <span className="badge">已标记</span>}{(entry.listened_today || listenedToday.has(entry.id)) && <span className="badge">今日已听</span>}{entry.listen_count ? <span className="badge">已听 {entry.listen_count} 次</span> : <span className="badge">未听</span>}</h2>
-        <p className="muted">第 {idx + 1} 段 / 队列 {items.length} · {entry.listen_count ? `本条已听 ${entry.listen_count} 次` : "本条未听"} · 今日累计 {listenedToday.size} 条 · 累计已听 {heardTotal} · 剩余可听 {queue.remaining}{queue.generating ? " · 正在续批生成…" : ""}{prefetching ? " · 后面内容加载中…" : ""}</p>
-        <p className="muted" style={{ fontSize: 12 }}>听学只记暴露，不记掌握</p>
-        <audio ref={audioRef} controls autoPlay key={`${entry.id}-${playNonce}`} src={`/api/audio/${entry.id}`} onLoadedMetadata={(e) => { durRef.current = Math.round(e.currentTarget.duration || 0); if (resumeRef.current > 0) { const dur = e.currentTarget.duration || 0; try { e.currentTarget.currentTime = dur > 0 ? Math.max(0, Math.min(resumeRef.current, dur - 0.25)) : resumeRef.current; } catch { /* 忽略 seek 失败 */ } resumeRef.current = 0; } }} onTimeUpdate={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); }} onPlay={() => { setPlaying(true); handleAudioRecovered(); }} onCanPlay={handleAudioRecovered} onWaiting={armStallTimer} onStalled={armStallTimer} onPause={(e) => { setPlaying(false); playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0); markExposed(); }} onEnded={(e) => { playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || e.currentTarget.duration || 0); markExposed(true); next(); }} onError={handleAudioError} />
-        <div className="row">
-          <button className="btn btn-ghost" disabled={idx === 0} onClick={prev}>上一个</button>
-          <button className="btn btn-ghost" onClick={toggleMark}>{isMarked ? "已标记 ✓" : "标记"}</button>
-          <button className="btn btn-ghost" onClick={next}>{playing ? "跳过" : "下一段"}</button>
-        </div>
-        <div className="row">
-          <button className="btn btn-ghost" onClick={() => setShowText((s) => !s)}>
-            {showText ? "收起原文" : "显示原文"}
-          </button>
-          <button className="btn btn-ghost" onClick={askAi}>问 AI{aiLabel}</button>
-        </div>
-        {showText && (
-          <div className="analysis" style={{ textAlign: "left" }}>
-            <p><b>场景：</b>{entry.anchor}</p>
-            <p><b>结论：</b>{entry.conclusion}</p>
-            {entry.note && <p className="note">⚠ {entry.note}</p>}
-            {entry.tts_text && <p className="muted">播报文本：{entry.tts_text}</p>}
-            {entry.statutes.length > 0 && (
-              <div className="source-chips" style={{ marginTop: 8 }}>
-                {entry.statutes.map((st, i) => (
-                  <button key={i} className="chip" onClick={() => setStatute(st)}>{st}</button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {entry.cases.length > 0 && <div className="source-chips" style={{ justifyContent: "center" }}>{entry.cases.map((c, i) => (<button key={i} className="chip" onClick={() => setSource({ kind: "case", ref: c.source, loc: c.loc })}>查看原文 · 案例 {i + 1}</button>))}</div>}
-      </div>
+      <ListenSegment
+        entry={entry} idx={idx} total={items.length}
+        heardTotal={heardTotal} remaining={queue.remaining}
+        generating={Boolean(queue.generating)} prefetching={prefetching}
+        playing={playing} todayCount={listenedToday.size}
+        listenedToday={listenedToday.has(entry.id)}
+        isMarked={isMarked} showText={showText} aiLabel={aiLabel}
+        audio={{
+          ref: audioRef,
+          src: `/api/audio/${entry.id}`,
+          audioKey: `${entry.id}-${playNonce}`,
+          onLoadedMetadata: (e) => {
+            durRef.current = Math.round(e.currentTarget.duration || 0);
+            if (resumeRef.current > 0) {
+              const dur = e.currentTarget.duration || 0;
+              try {
+                e.currentTarget.currentTime = dur > 0
+                  ? Math.max(0, Math.min(resumeRef.current, dur - 0.25))
+                  : resumeRef.current;
+              } catch { /* 忽略 seek 失败 */ }
+              resumeRef.current = 0;
+            }
+          },
+          onTimeUpdate: (e) => {
+            playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0);
+          },
+          onPlay: () => { setPlaying(true); handleAudioRecovered(); },
+          onCanPlay: handleAudioRecovered,
+          onWaiting: armStallTimer,
+          onStalled: armStallTimer,
+          onPause: (e) => {
+            setPlaying(false);
+            playedRef.current = Math.max(playedRef.current, e.currentTarget.currentTime || 0);
+            markExposed();
+          },
+          onEnded: (e) => {
+            playedRef.current = Math.max(
+              playedRef.current, e.currentTarget.currentTime || e.currentTarget.duration || 0);
+            markExposed(true);
+            next();
+          },
+          onError: handleAudioError,
+        }}
+        onToggleText={() => setShowText((s) => !s)}
+        onPrev={prev} onNext={next} onToggleMark={() => void marks.toggleMark(entry.id)}
+        onAskAi={askAi}
+        onStatute={(st) => setStatute(st)}
+        onCase={(c) => setSource({ kind: "case", ref: c.source, loc: c.loc })}
+      />
       <SourceViewer source={source} statute={statute} onClose={() => { setSource(null); setStatute(null); }} />
-      {marksOpen && <div className="source-modal" onClick={() => setMarksOpen(false)}><div className="source-panel" onClick={(e) => e.stopPropagation()}><ListenMarksPanel marked={marked} onClose={() => setMarksOpen(false)} onRemove={removeMark} onReplay={replayMarked} onView={viewMarked} onClear={clearMarks} /></div></div>}
+      {marks.marksOpen && <div className="source-modal" onClick={() => marks.setMarksOpen(false)}><div className="source-panel" onClick={(e) => e.stopPropagation()}><ListenMarksPanel marked={marks.marked} onClose={() => marks.setMarksOpen(false)} onRemove={marks.removeMark} onReplay={replayMarked} onView={viewMarked} onClear={() => void marks.clearMarks()} /></div></div>}
       <CustomRangePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onConfirm={(r) => void applyCustom(r)} />
     </div>
   );

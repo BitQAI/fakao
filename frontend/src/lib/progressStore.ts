@@ -63,7 +63,13 @@ export function toggleMarkedItem(
 
 /** 听学自定义范围持久化（科目/知识点 + 已见 id + 进度） */
 export interface SavedListenCustom {
-  range: { subjects: string[]; points: string[] };
+  /** range 与 CustomRangePicker 的 CustomRange 一致（kinds/laws 可选：法条题卡） */
+  range: {
+    subjects: string[];
+    points: string[];
+    kinds?: ("entry" | "card")[];
+    laws?: string[];
+  };
   seenIds: string[];
   remaining: number;
   idx: number;
