@@ -152,6 +152,22 @@ def judge_quiz(conn, subjects: list[str] | None = None,
     return {"questions": questions, "total": len(questions)}
 
 
+#: 题库补齐的抽题池倍数：先随机取大池再按配额分流，
+#: 否则 limit 很小时随机抽样可能一条法条题都抽不到，配额形同虚设
+_POOL_FACTOR = 4
+
+
+def _fill_order(conn, subjects: list[str], points: list[str], limit: int,
+                statute_quota: int) -> list[dict]:
+    """题库补齐顺序：先按配额放法条驱动题（basis 有值、entry_id 为空），再放其余题。"""
+    pool = quiz_bank.pick(conn, origins=(quiz_bank.ORIGIN_BANK,),
+                          limit=max(limit, limit * _POOL_FACTOR),
+                          subjects=subjects or None, points=points or None)
+    statute = [q for q in pool if not q.get("entry_id")]
+    others = [q for q in pool if q.get("entry_id")]
+    return statute[:statute_quota] + others + statute[statute_quota:]
+
+
 def custom_quiz(conn, subjects: list[str], points: list[str],
                 limit: int = 10, timed: bool = False) -> dict:
     """智能组卷：按科目/知识点过滤（复用自定义范围排序），题目优先题库。
@@ -171,12 +187,7 @@ def custom_quiz(conn, subjects: list[str], points: list[str],
                  for e in entries[:max(0, limit - statute_quota)]]
     if len(questions) < limit:
         seen = {q["id"] for q in questions}
-        picked = quiz_bank.pick(conn, origins=(quiz_bank.ORIGIN_BANK,),
-                                limit=limit, subjects=subjects or None,
-                                points=points or None)
-        statute_first = ([q for q in picked if not q.get("entry_id")]
-                         if statute_quota else [])
-        for q in statute_first + picked:
+        for q in _fill_order(conn, subjects, points, limit, statute_quota):
             if len(questions) >= limit:
                 break
             if q["id"] in seen:
