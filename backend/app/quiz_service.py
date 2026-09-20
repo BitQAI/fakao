@@ -154,11 +154,34 @@ def judge_quiz(conn, subjects: list[str] | None = None,
 
 def custom_quiz(conn, subjects: list[str], points: list[str],
                 limit: int = 10, timed: bool = False) -> dict:
-    """智能组卷：按科目/知识点过滤（复用自定义范围排序），题目走当日缓存。"""
+    """智能组卷：按科目/知识点过滤（复用自定义范围排序），题目优先题库。
+
+    条目题不足题量时，从题库补齐（会带出法条驱动题：basis 有值、entry_id 为空），
+    让「法条库 → 题库」的扩容真正能被练到。
+    """
     from app.service import custom_entries
 
     day = date.today().isoformat()
-    entries = custom_entries(conn, subjects, points, limit=limit)
-    questions = [_quiz_for_entry(conn, e, day) for e in entries[:limit]]
+    # 每 3 题留 1 题给法条驱动题（basis 有值、entry_id 为空），
+    # 否则组卷永远只出条目题，法条库补全的内容练不到。
+    statute_quota = limit // 3
+    entries = custom_entries(conn, subjects, points,
+                             limit=max(1, limit - statute_quota))
+    questions = [_quiz_for_entry(conn, e, day)
+                 for e in entries[:max(0, limit - statute_quota)]]
+    if len(questions) < limit:
+        seen = {q["id"] for q in questions}
+        picked = quiz_bank.pick(conn, origins=(quiz_bank.ORIGIN_BANK,),
+                                limit=limit, subjects=subjects or None,
+                                points=points or None)
+        statute_first = ([q for q in picked if not q.get("entry_id")]
+                         if statute_quota else [])
+        for q in statute_first + picked:
+            if len(questions) >= limit:
+                break
+            if q["id"] in seen:
+                continue
+            questions.append(q)
+            seen.add(q["id"])
     conn.commit()
     return {"questions": questions, "timed": timed, "total": len(questions)}

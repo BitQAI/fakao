@@ -301,6 +301,7 @@ export default function QuizView() {
               <p className="muted">正确答案：{result.answer}</p>
             )}
             {q.qtype === "cloze" && <p className="muted">正确答案：{result.answer}</p>}
+            {q.basis && <p className="muted">法条依据：{q.basis}</p>}
             <div className="analysis" dangerouslySetInnerHTML={{ __html: mdToHtml(result.analysis || `正确答案：${result.answer}`) }} />
             <div className="row">
               <button className="btn btn-ghost" onClick={goNext}>下一题</button>

@@ -165,6 +165,74 @@ def test_judge_quiz_picks_only_published_judge(tmp_db):
     conn.close()
 
 
+def test_custom_quiz_fills_with_statute_questions(tmp_db):
+    """条目题不足题量时，用题库补齐（含法条驱动题）。"""
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn, 2)
+    for i in (1, 2):
+        quiz_bank.save_question(
+            conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK,
+            entry_id=f"XF-{i:03d}", subject="刑法", point=f"考点{i}",
+            stem=f"条目题{i}", options=["A. 甲", "B. 乙"], answer="A",
+            analysis="解析", status="published")
+    quiz_bank.save_question(
+        conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK, entry_id=None,
+        subject="刑法", stem="法条题：依据著作权法第四十六条命制的题目",
+        options=["A. 甲", "B. 乙"], answer="A", analysis="解析",
+        basis="中华人民共和国著作权法第四十六条", status="published")
+    out = quiz_service.custom_quiz(conn, ["刑法"], [], limit=5)
+    stems = [q["stem"] for q in out["questions"]]
+    assert "法条题：依据著作权法第四十六条命制的题目" in stems
+    assert len(stems) == len(set(stems)) == 3
+    conn.close()
+
+
+def test_custom_quiz_keeps_entries_when_enough(tmp_db):
+    """题量小于 3 时不混入法条题（保持原有行为）。"""
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn, 3)
+    for i in range(1, 4):
+        quiz_bank.save_question(
+            conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK,
+            entry_id=f"XF-{i:03d}", subject="刑法", point=f"考点{i}",
+            stem=f"条目题{i}", options=["A. 甲", "B. 乙"], answer="A",
+            analysis="解析", status="published")
+    quiz_bank.save_question(
+        conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK, entry_id=None,
+        subject="刑法", stem="法条题X", options=["A. 甲", "B. 乙"], answer="A",
+        analysis="解析", basis="中华人民共和国刑法第一条", status="published")
+    out = quiz_service.custom_quiz(conn, ["刑法"], [], limit=2)
+    assert len(out["questions"]) == 2
+    assert all(q["stem"].startswith("条目题") for q in out["questions"])
+    conn.close()
+
+
+def test_custom_quiz_reserves_quota_for_statute_questions(tmp_db):
+    """题量 ≥3 时留 1/3 给法条驱动题（否则法条库扩容永远练不到）。"""
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    seed(conn, 6)
+    for i in range(1, 7):
+        quiz_bank.save_question(
+            conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK,
+            entry_id=f"XF-{i:03d}", subject="刑法", point=f"考点{i}",
+            stem=f"条目题{i}", options=["A. 甲", "B. 乙"], answer="A",
+            analysis="解析", status="published")
+    for i in range(3):
+        quiz_bank.save_question(
+            conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK, entry_id=None,
+            subject="刑法", stem=f"法条题{i}", options=["A. 甲", "B. 乙"],
+            answer="A", analysis="解析", basis=f"中华人民共和国刑法第{i + 1}条",
+            status="published")
+    out = quiz_service.custom_quiz(conn, ["刑法"], [], limit=6)
+    stems = [q["stem"] for q in out["questions"]]
+    assert len(stems) == 6
+    assert sum(1 for s in stems if s.startswith("法条题")) == 2   # 6 // 3
+    conn.close()
+
+
 def _client(tmp_path):
     db_path = tmp_path / "judge.db"
     conn = db.connect(db_path)
