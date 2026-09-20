@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getJson } from "@/lib/api";
+import KeywordSearch from "@/components/KeywordSearch";
+import { matchesKeyword, searchTree, subKey } from "@/lib/pointSearch";
 import type { CoverageTree } from "@/lib/types";
 
 export interface CustomRange {
@@ -67,6 +69,7 @@ export default function CustomRangePicker({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [keyword, setKeyword] = useState("");
 
   useEffect(() => setMounted(true), []);
 
@@ -79,6 +82,7 @@ export default function CustomRangePicker({
     setSubjects(new Set());
     setPoints(new Set());
     setExpanded(new Set());
+    setKeyword("");
   }, [open]);
 
   if (!open) return null;
@@ -105,6 +109,10 @@ export default function CustomRangePicker({
   const pointsOf = (subject: string, sub: string): string[] =>
     Object.keys(tree[subject].submodules[sub].points);
   const selectedCount = mode === "subject" ? subjects.size : points.size;
+  const found = searchTree(tree, keyword);
+  const shownSubjects = found.active
+    ? subjectNames.filter((name) => matchesKeyword(keyword, name))
+    : subjectNames;
 
   function toggleSubject(name: string) {
     setSubjects((prev) => {
@@ -159,6 +167,18 @@ export default function CustomRangePicker({
       : { subjects: [], points: Array.from(points) });
   }
 
+  function toggleHitPoints() {
+    setPoints((prev) => {
+      const next = new Set(prev);
+      const all = Array.from(found.points).every((p) => next.has(p));
+      found.points.forEach((p) => (all ? next.delete(p) : next.add(p)));
+      return next;
+    });
+  }
+
+  const hitAllSelected = found.total > 0
+    && Array.from(found.points).every((p) => points.has(p));
+
   return createPortal((
     <div className="source-modal" onClick={onClose}>
       <div className="source-panel" onClick={(e) => e.stopPropagation()}>
@@ -178,9 +198,17 @@ export default function CustomRangePicker({
               </button>
             </div>
           )}
+          {mode !== null && (
+            <KeywordSearch
+              value={keyword}
+              onChange={setKeyword}
+              placeholder={mode === "subject" ? "搜索科目…" : "搜索子模块 / 考点…"}
+              hint={mode === "points" && found.active ? `命中 ${found.total} 个考点` : null}
+            />
+          )}
           {mode === "subject" && (
             <div className="pick-list">
-              {subjectNames.map((name) => {
+              {shownSubjects.map((name) => {
                 const sc = stateCounts(tree[name].states, tree[name].count);
                 return (
                   <label key={name} className="pick-item">
@@ -197,15 +225,18 @@ export default function CustomRangePicker({
                   </label>
                 );
               })}
+              {shownSubjects.length === 0 && <p className="muted search-empty">无匹配科目</p>}
             </div>
           )}
           {mode === "points" && (
             <div className="pick-tree">
+              {found.active && found.total === 0 && <p className="muted search-empty">无匹配考点</p>}
               {subjectNames.map((subject) => {
                 const sPoints = allPointsOf(subject);
                 const sChecked = sPoints.length > 0 && sPoints.every((p) => points.has(p));
                 const sInd = sPoints.some((p) => points.has(p)) && !sChecked;
                 const sCounts = stateCounts(tree[subject].states, tree[subject].count);
+                if (found.active && !found.subjects.has(subject)) return null;
                 return (
                   <div key={subject} className="pick-group">
                     <div className="pick-row pick-subject-row">
@@ -215,15 +246,16 @@ export default function CustomRangePicker({
                         onChange={() => toggleSubjectAll(subject)}
                       />
                       <button className="pick-toggle" onClick={() => toggleExpand(subject)}>
-                        {expanded.has(subject) ? "▾" : "▸"} {subject}
+                        {(found.active || expanded.has(subject)) ? "▾" : "▸"} {subject}
                         <span className="muted">
                           （{tree[subject].count} 条 · 已学 {sCounts.learned} · 未学 {sCounts.unlearned}）
                           <UnBadges unread={tree[subject].unread ?? 0} unlistened={tree[subject].unlistened ?? 0} />
                         </span>
                       </button>
                     </div>
-                    {expanded.has(subject) && (
+                    {(found.active || expanded.has(subject)) && (
                       Object.entries(tree[subject].submodules).map(([sub, sd]) => {
+                        if (found.active && !found.subs.has(subKey(subject, sub))) return null;
                         const pNames = pointsOf(subject, sub);
                         const subChecked = pNames.every((p) => points.has(p));
                         const subInd = pNames.some((p) => points.has(p)) && !subChecked;
@@ -243,6 +275,7 @@ export default function CustomRangePicker({
                             </div>
                             <div className="pick-points">
                               {pNames.map((p) => {
+                                if (found.active && !found.points.has(p)) return null;
                                 const pt = sd.points[p];
                                 return (
                                   <label key={p} className="pick-point">
@@ -272,6 +305,11 @@ export default function CustomRangePicker({
         {mode && (
           <div className="pick-footer">
             <button className="btn" onClick={() => setMode(null)}>返回</button>
+            {mode === "points" && found.active && (
+              <button className="btn" onClick={toggleHitPoints}>
+                {hitAllSelected ? "取消全选命中" : "全选命中"}
+              </button>
+            )}
             <button
               className="btn btn-primary"
               disabled={selectedCount === 0}
