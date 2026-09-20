@@ -1,6 +1,6 @@
 import sqlite3
 
-from app import db
+from app import db, quiz_bank
 
 
 def test_connect_creates_tables(tmp_db):
@@ -144,6 +144,49 @@ def test_judge_capable_but_legacy_shape_migrates(tmp_db):
     conn.commit()
     assert conn.execute("SELECT COUNT(*) FROM quizzes WHERE entry_id IS NULL"
                         ).fetchone()[0] == 1
+    conn.close()
+
+
+def test_quizzes_gains_variant_and_archived_status(tmp_db):
+    """现网形态（含 judge、entry_id 可空）缺 variant/archived 时重建：
+    依据 basis 必须保留，variant 回填 number，archived 不被批量发布复活。"""
+    db_path, _ = tmp_db
+    raw = sqlite3.connect(db_path)
+    raw.executescript(
+        "CREATE TABLE quizzes ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id TEXT REFERENCES entries(id),"
+        " subject TEXT NOT NULL DEFAULT '', point TEXT NOT NULL DEFAULT '',"
+        " qtype TEXT NOT NULL CHECK(qtype IN ('choice','cloze','judge')),"
+        " origin TEXT NOT NULL DEFAULT 'daily'"
+        "   CHECK(origin IN ('daily','bank','judge')),"
+        " stem TEXT NOT NULL, options TEXT NOT NULL DEFAULT '[]',"
+        " answer TEXT NOT NULL, analysis TEXT NOT NULL DEFAULT '',"
+        " basis TEXT NOT NULL DEFAULT '',"
+        " status TEXT NOT NULL DEFAULT 'published'"
+        "   CHECK(status IN ('draft','published')),"
+        " text_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);"
+        "CREATE TABLE quiz_answers ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, quiz_id INTEGER NOT NULL,"
+        " ts TEXT NOT NULL, user_answer TEXT NOT NULL, correct INTEGER NOT NULL,"
+        " duration_sec INTEGER NOT NULL DEFAULT 0);"
+        "INSERT INTO quizzes (entry_id, subject, point, qtype, origin, stem, options,"
+        " answer, analysis, basis, status, text_hash, created_at) "
+        "VALUES (NULL,'刑诉','强制措施','judge','judge','刑事拘留最长37日。','[]','对',"
+        "'拘留期限。','刑诉法第91条','draft','h1','2026-09-20T10:00:00');"
+    )
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(db_path)
+    info = {r["name"] for r in conn.execute("PRAGMA table_info(quizzes)").fetchall()}
+    assert "variant" in info
+    row = conn.execute("SELECT * FROM quizzes WHERE id=1").fetchone()
+    assert row["basis"] == "刑诉法第91条"      # 重建不得丢掉依据
+    assert row["variant"] == "number"          # 历史判断题回填数字型
+    conn.execute("UPDATE quizzes SET status='archived' WHERE id=1")
+    conn.commit()
+    quiz_bank.set_status(conn, origins=("judge",), status="published")
+    assert conn.execute("SELECT status FROM quizzes WHERE id=1").fetchone()[0] == "archived"
     conn.close()
 
 

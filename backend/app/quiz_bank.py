@@ -19,7 +19,7 @@ _JUDGE_TRUE = {"对", "正确", "是", "true", "t", "y", "yes", "1"}
 _JUDGE_FALSE = {"错", "错误", "否", "false", "f", "n", "no", "0"}
 
 _SELECT_COLS = ("id, entry_id, subject, point, qtype, stem, options, answer,"
-                " analysis, basis")
+                " analysis, basis, variant")
 
 
 def normalize_judge_answer(value: str) -> str | None:
@@ -38,6 +38,7 @@ def _row_to_question(row) -> dict:
         "point": row["point"], "qtype": row["qtype"], "stem": row["stem"],
         "options": json.loads(row["options"] or "[]"), "answer": row["answer"],
         "analysis": row["analysis"] or "", "basis": row["basis"] or "",
+        "variant": row["variant"] or "",
     }
 
 
@@ -69,7 +70,8 @@ def find_question(conn, *, origin: str, qtype: str, entry_id: str | None,
 def save_question(conn, *, qtype: str, origin: str, stem: str, answer: str,
                   analysis: str = "", basis: str = "", entry_id: str | None = None,
                   subject: str = "", point: str = "", options: list[str] | None = None,
-                  status: str = "draft", replace: bool = False) -> int | None:
+                  variant: str = "", status: str = "draft",
+                  replace: bool = False) -> int | None:
     """写入一道题库题（幂等）。
 
     - 同 key 已存在且指纹相同：直接返回原 id（不重复出题、不重复计费）
@@ -84,18 +86,18 @@ def save_question(conn, *, qtype: str, origin: str, stem: str, answer: str,
             return existing["id"]
         conn.execute(
             "UPDATE quizzes SET stem=?, options=?, answer=?, analysis=?, basis=?,"
-            " subject=?, point=?, status=?, text_hash=? WHERE id=?",
+            " subject=?, point=?, variant=?, status=?, text_hash=? WHERE id=?",
             (stem, json.dumps(options, ensure_ascii=False), answer, analysis, basis,
-             subject, point, status, text_hash, existing["id"]))
+             subject, point, variant, status, text_hash, existing["id"]))
         conn.commit()
         return existing["id"]
     cur = conn.execute(
         "INSERT INTO quizzes (entry_id, subject, point, qtype, origin, stem, options,"
-        " answer, analysis, basis, status, text_hash, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " answer, analysis, basis, variant, status, text_hash, created_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (entry_id, subject, point, qtype, origin, stem,
-         json.dumps(options, ensure_ascii=False), answer, analysis, basis, status,
-         text_hash, datetime.now().isoformat(timespec="seconds")))
+         json.dumps(options, ensure_ascii=False), answer, analysis, basis, variant,
+         status, text_hash, datetime.now().isoformat(timespec="seconds")))
     conn.commit()
     return cur.lastrowid
 
@@ -119,8 +121,11 @@ def pick(conn, *, origins: tuple[str, ...] = (ORIGIN_BANK,), limit: int = 10,
 
 def set_status(conn, *, origins: tuple[str, ...], status: str,
                subjects: list[str] | None = None) -> int:
-    """批量转状态（draft → published 发布 / 回退），返回影响行数。"""
-    sql = ("UPDATE quizzes SET status=? WHERE origin IN (%s)"
+    """批量转状态（draft → published 发布 / 回退），返回影响行数。
+
+    `archived`（下架题）不参与批量发布，避免把已归档的重复题拉回抽题池。
+    """
+    sql = ("UPDATE quizzes SET status=? WHERE origin IN (%s) AND status != 'archived'"
            % ",".join("?" * len(origins)))
     params: list = [status, *origins]
     if subjects:

@@ -113,6 +113,22 @@
 .venv/bin/python scripts/audit_quiz_coverage.py --top 30 \
   --report ../docs/superpowers/research/2026-09-20-法条覆盖与题库核验报告.md
 
+# 关系型判断题（情态词/程序层级/易混概念对，2026-09-20 新增）
+.venv/bin/python scripts/build_relation_judge.py --source statutes --dry-run
+.venv/bin/python scripts/build_relation_judge.py --source statutes --max-per-article 2 --workers 8
+.venv/bin/python scripts/build_relation_judge.py --source entries --workers 8
+.venv/bin/python scripts/build_relation_judge.py --source counterparts   # 同源补「错」题配平
+.venv/bin/python scripts/build_relation_judge.py --publish              # 抽检后发布
+
+# 判断题去重 / 降相似（归档可逆：status='archived'，不进抽题池，--publish 不复活）
+.venv/bin/python scripts/dedupe_judge_bank.py                           # dry-run
+.venv/bin/python scripts/dedupe_judge_bank.py --apply \
+  --report ../docs/superpowers/research/2026-09-20-判断题去重报告.md
+
+# 关系题覆盖审计（哪部法、哪个词族、哪些条目还没出题）
+.venv/bin/python scripts/audit_relation_coverage.py --top 30 \
+  --report ../docs/superpowers/research/2026-09-21-关系型判断题覆盖报告.md
+
 # 题库概览
 curl -s localhost:8090/api/quiz/bank/stats
 ```
@@ -120,12 +136,19 @@ curl -s localhost:8090/api/quiz/bank/stats
 **覆盖口径**：法条覆盖率 = 被题目覆盖的条文数 / 条文总数（`quizzes.basis` 能解析到该法该条）。
 条目派生题只覆盖「已写进条目的考点」，所以必须用 `build_statute_quiz.py` 按法条库缺口补题；
 组卷（`custom_quiz`）会留 1/3 题量给法条驱动题，否则补出来的题练不到。
+判断题分两类，用 `quizzes.variant` 区分：`number` 数字型 / 17 个关系词族（`modal`、`form`、
+`instance`、`review`…）关系型；`status` 新增 `archived`＝下架（保留行与答题历史）。
 
 **数字判断题的硬闸门**（`app/number_terms.py`）：「对」题的数字必须全部能在依据原文
 （法条 / 条目结论）中找到；「错」题只允许改写一处数字。不满足即丢弃，避免编造数字。
 中文数字与阿拉伯数字折算后比较（「三十日」==「30日」），「以内」与「内」等价，
 条目号与年份不作为考点数字；纯「自某年某月某日起施行」的生效日期句不算数字考点，直接丢弃。
 条目侧的题干来自「场景＋结论」，因此校验原文用两者拼接（场景里的判几年、几个月也属合法依据）。
+
+**关系型判断题的硬闸门**（`app/relation_terms.py`，17 个词族）：「对」题不得出现原文没有的
+关系词（拦住「可以↔应当」「决定↔决议」偷换）；「错」题有且仅有 1 处偷换且必须落在
+`SWAPS` 白名单内（如 一审→二审、复议→复核、独任→合议庭、罚金→罚款）；机关主体必须在原文命中；
+「对」题与原文单句相似度 ≥0.95 视为照抄丢弃。题干含数字时还要再过一遍数字闸门。
 
 挂接后必须重导 entries JSON（见 3.3）才会同步 DB。指导性案例匹配机制：条目考点词 × 案例关键词/标题粗筛 → 正文核验（专用词必须命中）→ 领域门槛（刑事→刑法/刑诉，民事/知产→民法/民诉/商经知劳环+三国法涉外，行政/国赔→行政法）。
 

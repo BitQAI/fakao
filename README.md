@@ -118,6 +118,28 @@ cd frontend && npm run dev   # /api 自动代理到 8000
 题库缺题才回退 LLM 现生成。组卷会留约 1/3 题量给「法条驱动题」（basis 有值、不挂条目），
 保证法条库补全的内容能被练到。数字判断题有硬校验：题干数字必须能在法条/结论原文中找到。
 
+判断题分两类，用 `quizzes.variant` 区分：`number`（数字型，`build_judge_bank.py`）与
+17 个关系词族（`modal`/`form`/`instance`/`review`… 关系型，考「可以/应当」「决定/决议」
+「一审/二审」「复议/复核」「独任/合议庭」这类措辞与程序层级）。关系型出题与治理：
+
+```bash
+.venv/bin/python scripts/build_relation_judge.py --source statutes --dry-run
+.venv/bin/python scripts/build_relation_judge.py --source statutes --max-per-article 2 --workers 8
+.venv/bin/python scripts/build_relation_judge.py --source entries --workers 8
+.venv/bin/python scripts/build_relation_judge.py --source counterparts   # 同源补「错」题配平
+.venv/bin/python scripts/build_relation_judge.py --publish              # 抽检后发布
+.venv/bin/python scripts/dedupe_judge_bank.py                           # 去重 dry-run
+.venv/bin/python scripts/dedupe_judge_bank.py --apply \
+  --report ../docs/superpowers/research/2026-09-20-判断题去重报告.md
+.venv/bin/python scripts/audit_relation_coverage.py --top 30 \
+  --report ../docs/superpowers/research/2026-09-21-关系型判断题覆盖报告.md
+```
+
+关系型判断题同样有硬闸门（`app/relation_terms.py`）：「对」题不得出现原文没有的关系词，
+「错」题只允许按白名单偷换一处，机关主体必须与原文一致。
+`dedupe_judge_bank.py` 把重复/高度相似的题置为 `status='archived'`
+（下架不进抽题池、可逆，`--publish` 不会复活归档题）。
+
 ### TTS 质检与修复（在 `backend/` 下执行）
 
 ```bash

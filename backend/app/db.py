@@ -22,7 +22,12 @@ CREATE TABLE IF NOT EXISTS entries (
   statutes   TEXT NOT NULL DEFAULT '[]',
   note       TEXT,
   tts_text   TEXT NOT NULL,
-  status     TEXT NOT NULL DEFAULT 'draft'
+  status     TEXT NOT NULL DEFAULT 'draft',
+  -- kind：entry=正式条目（默认）/ card=法条题卡（由 scripts/sync_card_entries.py 从题库重建）
+  -- options / article_text：卡片专用（选择题选项、条文原文摘要），正式条目留默认值
+  kind         TEXT NOT NULL DEFAULT 'entry',
+  options      TEXT NOT NULL DEFAULT '[]',
+  article_text TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS reviews (
@@ -35,8 +40,9 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_entry ON reviews(entry_id, ts);
 
--- origin：daily=当日缓存题（按天生成）/ bank=客观题库 / judge=数字判断题题库
--- status：题库题先入库为 draft，抽检后 --publish 转 published（当日缓存题直接 published）
+-- origin：daily=当日缓存题（按天生成）/ bank=客观题库 / judge=判断题题库（数字型 + 关系型）
+-- status：题库题先入库为 draft，抽检后 --publish 转 published；archived=下架（不进抽题池）
+-- variant：判断题的考点类型（number / 17 个关系词族），其他题型留空
 -- entry_id 可空：法条派生的判断题不挂条目；subject/point 冗余存储，供按科目知识点抽题
 CREATE TABLE IF NOT EXISTS quizzes (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +56,9 @@ CREATE TABLE IF NOT EXISTS quizzes (
   answer     TEXT NOT NULL,
   analysis   TEXT NOT NULL DEFAULT '',
   basis      TEXT NOT NULL DEFAULT '',
-  status     TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft','published')),
+  variant    TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL DEFAULT 'published'
+             CHECK(status IN ('draft','published','archived')),
   text_hash  TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -171,7 +179,9 @@ CREATE TABLE quizzes (
   answer     TEXT NOT NULL,
   analysis   TEXT NOT NULL DEFAULT '',
   basis      TEXT NOT NULL DEFAULT '',
-  status     TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft','published')),
+  variant    TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL DEFAULT 'published'
+             CHECK(status IN ('draft','published','archived')),
   text_hash  TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 )
@@ -213,16 +223,18 @@ def _backup_quiz_tables(conn) -> Path | None:
 
 
 def _quiz_rebuild_needed(conn) -> bool:
-    """重建条件：qtype CHECK 不含 judge，或 entry_id 仍为 NOT NULL（题库需可空）。"""
+    """重建条件：CHECK 约束过旧（缺 judge / archived），或列缺失（subject/point/variant），
+    或 entry_id 仍为 NOT NULL（题库需可空）。"""
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='quizzes'"
     ).fetchone()
     if row is None:
         return False
-    if "'judge'" not in (row["sql"] or ""):
+    sql = row["sql"] or ""
+    if "'judge'" not in sql or "'archived'" not in sql:
         return True
     info = {r["name"]: r for r in conn.execute("PRAGMA table_info(quizzes)").fetchall()}
-    if "subject" not in info or "point" not in info:
+    if {"subject", "point", "variant"} - set(info):
         return True
     return bool(info["entry_id"]["notnull"])
 
@@ -236,7 +248,7 @@ def _migrate_quiz_schema(conn) -> None:
     answers = [dict(r) for r in conn.execute("SELECT * FROM quiz_answers")]
     meta = {
         r["id"]: (r["subject"], r["point"])
-        for r in conn.execute("SELECT id, subject, point FROM entries").fetchall()
+        for r in conn.execute("SELECT id, subject, point FROM v_entries").fetchall()
     }
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
@@ -250,13 +262,14 @@ def _migrate_quiz_schema(conn) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_quizzes_entry ON quizzes(entry_id)")
         conn.executemany(
             "INSERT INTO quizzes (id, entry_id, subject, point, qtype, origin, stem,"
-            " options, answer, analysis, basis, status, text_hash, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " options, answer, analysis, basis, variant, status, text_hash, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [(q["id"], q["entry_id"],
               q.get("subject") or meta.get(q["entry_id"], ("", ""))[0],
               q.get("point") or meta.get(q["entry_id"], ("", ""))[1],
               q["qtype"], q.get("origin") or "daily", q["stem"],
-              q["options"] or "[]", q["answer"], q.get("analysis") or "", "",
+              q["options"] or "[]", q["answer"], q.get("analysis") or "",
+              q.get("basis") or "", q.get("variant") or "",
               q.get("status") or "published", q.get("text_hash")
               or question_hash(q["stem"], q["answer"]), q["created_at"])
              for q in quizzes],
@@ -272,16 +285,43 @@ def _migrate_quiz_schema(conn) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_entry_columns(conn) -> None:
+    """存量库补齐 entries 的卡片列（kind / options / article_text）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
+    for col, ddl in (("kind", "TEXT NOT NULL DEFAULT 'entry'"),
+                     ("options", "TEXT NOT NULL DEFAULT '[]'"),
+                     ("article_text", "TEXT NOT NULL DEFAULT ''")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE entries ADD COLUMN {col} {ddl}")
+    conn.commit()
+
+
+def _ensure_entry_view(conn) -> None:
+    """「条目空间」视图：一切按条目语义读取的查询走它，卡片（kind='card'）被排除。
+
+    反之，看背/听学队列、标记、音频、审阅历史、错题本等需要看见卡片的查询直接读 entries。
+    判定口径见 docs/superpowers/specs/2026-09-20-法条题卡条目化统一-design.md §3。
+    """
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS v_entries AS "
+        "SELECT * FROM entries WHERE kind='entry'")
+    conn.commit()
+
+
 def connect(db_path: Path | None = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path is not None else config.DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     # check_same_thread=False：SSE 流式响应（assistant）在事件循环线程写聊天日志，
     # 同一请求的连接需跨线程复用（每请求独立连接，无并发共享）。
-    conn = sqlite3.connect(path, check_same_thread=False)
+    # timeout=30：批量出题脚本与后端可能同时写库，默认 5s 太短容易 database is locked
+    conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA_SQL)
     # 轻量迁移（本仓库无 Alembic，用幂等 ALTER / 重建）：
+    # 0) 存量库补齐 entries 的卡片列，并建立「条目空间」视图 v_entries
+    _migrate_entry_columns(conn)
+    _ensure_entry_view(conn)
     # 1) 极旧库补齐 quizzes.analysis 列
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(quizzes)").fetchall()}
     if "analysis" not in cols:
@@ -298,6 +338,10 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
             conn.execute(f"ALTER TABLE quizzes ADD COLUMN {col} {ddl}")
     conn.commit()
     _migrate_quiz_schema(conn)
+    # 历史数字判断题没有 variant，升级后统一回填（关系型题由出题脚本显式写入）
+    conn.execute(
+        "UPDATE quizzes SET variant='number' WHERE origin='judge' AND variant=''")
+    conn.commit()
     # 3) 题库索引：等 quizzes 结构确定后再建（旧库缺列时此处才会成功）
     conn.execute("CREATE INDEX IF NOT EXISTS idx_quizzes_origin "
                  "ON quizzes(origin, status, subject)")
