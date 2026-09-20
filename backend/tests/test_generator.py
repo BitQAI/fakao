@@ -27,7 +27,7 @@ def test_next_pending_subject_order(tmp_db):
     conn = db.connect(db_path)
     assert generator.next_pending_subject(conn) == "民诉"
     _seed_subject(conn, "民诉", generator.SUBJECT_TARGET)
-    assert generator.next_pending_subject(conn) == "商经知"
+    assert generator.next_pending_subject(conn) == "商经知劳环"
 
 
 def test_next_pending_subject_none_when_full(tmp_db):
