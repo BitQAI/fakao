@@ -57,6 +57,22 @@
 .venv/bin/python scripts/synthesize_audio.py --id=XF-001   # 单条（先删旧 wav 才会重生成）
 ```
 
+朗读文本在合成前统一过 `app/tts_text.normalize`（去 Markdown、符号转中文词、
+中文间空格归一，不改写语义）；音频台账写在 `tts_assets`（entry_id/text_hash/时长）。
+
+质检与修复（2026-09-20 新增）：
+
+```bash
+.venv/bin/python scripts/audit_tts.py                    # 五类问题：缺失/空/陈旧/语速异常/未建档
+.venv/bin/python scripts/audit_tts.py --report ../docs/superpowers/research/2026-09-20-TTS质检报告.md
+.venv/bin/python scripts/repair_tts.py                   # dry-run，列出待修复
+.venv/bin/python scripts/repair_tts.py --apply           # 重合成（先取到新音频才覆盖，不会失声）
+.venv/bin/python scripts/repair_tts.py --apply --backfill  # 只给健康音频补台账
+```
+
+判定口径：语速 <3.0 或 >6.5 字/秒为异常（实测中位 4.81 字/秒，>6.5 都是被截断的录音）；
+整体 RMS <60 视为无声；首/尾静音 >2 秒为异常。**文本改过而音频没重合成 = 陈旧**，看 `tts_assets`。
+
 ### 3.5 案例装载与挂接
 
 ```bash
@@ -65,6 +81,33 @@
 .venv/bin/python scripts/match_cases.py            # 普通补配（只处理 cases 为空条目）
 .venv/bin/python scripts/match_cases.py --append-guiding   # 对已有 cases 条目追加指导性案例（领域门槛+上限 3）
 ```
+
+### 3.5b 题库生成（客观题 / 数字判断题，2026-09-20 新增）
+
+题库题与「当日缓存题」同表 `quizzes`，用 `origin` 区分：`daily` 当日懒生成、
+`bank` 客观题库、`judge` 数字判断题库；`status=draft` 不进抽题池，抽检后 `--publish`。
+自测/组卷/数判优先取题库，题库缺题才回退 LLM 现生成。
+
+```bash
+# 客观题题库：每条目 1 题
+.venv/bin/python scripts/build_quiz_bank.py --only-missing --workers 6
+.venv/bin/python scripts/build_quiz_bank.py --subject 民法 --limit 20
+.venv/bin/python scripts/build_quiz_bank.py --publish              # 抽检后发布
+
+# 数字判断题（数量/金额/年限/人数/期限）：法条侧 + 条目侧
+.venv/bin/python scripts/build_judge_bank.py --source statutes --per-law 3
+.venv/bin/python scripts/build_judge_bank.py --source entries
+.venv/bin/python scripts/build_judge_bank.py --publish
+
+# 题库概览
+curl -s localhost:8090/api/quiz/bank/stats
+```
+
+**数字判断题的硬闸门**（`app/number_terms.py`）：「对」题的数字必须全部能在依据原文
+（法条 / 条目结论）中找到；「错」题只允许改写一处数字。不满足即丢弃，避免编造数字。
+中文数字与阿拉伯数字折算后比较（「三十日」==「30日」），「以内」与「内」等价，
+条目号与年份不作为考点数字；纯「自某年某月某日起施行」的生效日期句不算数字考点，直接丢弃。
+条目侧的题干来自「场景＋结论」，因此校验原文用两者拼接（场景里的判几年、几个月也属合法依据）。
 
 挂接后必须重导 entries JSON（见 3.3）才会同步 DB。指导性案例匹配机制：条目考点词 × 案例关键词/标题粗筛 → 正文核验（专用词必须命中）→ 领域门槛（刑事→刑法/刑诉，民事/知产→民法/民诉/商经知劳环+三国法涉外，行政/国赔→行政法）。
 
@@ -103,3 +146,17 @@
 - 行政法生成偶发 anchor 短于 16 字被丢弃（LLM 输出波动），重跑对应 `--gaps` 即可。
 - 追加指导性案例后 240 条条目超 3 条上限被裁剪（优先保留指导性案例），原始引用可在 git 历史恢复。
 - README 中 TTS 描述需以 `backend/app/config.py` 为准（qwen-tts 链 + Ethan，非 qwen3-tts-instruct-flash/Neil）。
+
+## 6. 2026-09-20 实战补充
+
+- **截断录音**：历史上有 4 条 wav 只录了开头（SJ-677 87 字只录 5.8 秒，重合成 19.0 秒；
+  SG-339/SG-355/SJ-618 同类）。`audit_tts.py` 用语速阈值现可自动抓出，已全部重合成并建台账。
+- **文本改了必须重合成**：`tts_assets.text_hash` 与当前归一文本不一致即判陈旧。
+  2026-09-15/09-20 两次改条目文本后有 13 条音频是旧的，已重合成。
+- **备用 key**：`DASHSCOPE_API_KEY_FALLBACK`（.env）只在主 key 的全部 TTS 模型失败时启用；
+  2026-09-20 实测主 key 三模型均可用，备用通道仅作降级保险。
+- **题库表结构**：`quizzes` 增加 `entry_id`(可空) / `subject` / `point` / `origin` / `basis` /
+  `status` / `text_hash`，`qtype` 扩展 `judge`；旧库由 `db.connect()` 幂等重建升级
+  （会先把旧表备份到 `data/backup/`，该目录已 gitignore）。
+- 反查「数字」而非考点的干扰：法条里的公布日期、条号不属于考点数字，已在
+  `number_terms.extract` 中排除。

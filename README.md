@@ -72,7 +72,9 @@ sudo ufw allow 80/tcp
 
 - 今日：看倒计时、早报、今日计划与入口
 - 学习：看背（翻卡自评）/ 听学（白天挂着听）/ 自测（每日 10 题）
-- 学习 → 案例：主观题模块（按真实卷面 5 道大题组织）
+  - 自测子页签：今日 / 组卷 / **数判** / 历史。**数判**是「数」专项——
+    只考数量、金额、年限、人数、期限、比例，逐题判对错，错了立刻给正确值与法条依据
+  - 学习 → 案例：主观题模块（按真实卷面 5 道大题组织）
   - 今日案例：微主观题（第 2/3/5 题练习），写要点或只听，听完必须勾采分点
   - 论述题：第 1 题习近平法治思想，材料驱动，600 字以上；提交后给字数与「照搬材料」检查
   - 综合大案例：第 4 题民法＋民诉＋商法，8—13 小问，采分点按小问分组勾选
@@ -95,6 +97,28 @@ cd frontend && npm run dev   # /api 自动代理到 8000
 .venv/bin/python scripts/build_essay_questions.py --list                    # 论述题候选专题
 .venv/bin/python scripts/build_essay_questions.py --topic 依宪治国          # 生成论述题
 .venv/bin/python scripts/build_composite_questions.py --limit 2             # 综合大案例
+```
+
+### 客观题题库 / 数字判断题题库生成（在 `backend/` 下执行）
+
+```bash
+.venv/bin/python scripts/build_quiz_bank.py --only-missing --workers 6   # 条目 → 客观题库
+.venv/bin/python scripts/build_quiz_bank.py --publish                    # 抽检后发布
+.venv/bin/python scripts/build_judge_bank.py --source statutes --per-law 3
+.venv/bin/python scripts/build_judge_bank.py --source entries
+.venv/bin/python scripts/build_judge_bank.py --publish
+```
+
+题库题与当日缓存题同表（`quizzes`，按 `origin` 区分）；自测/组卷/数判优先取题库，
+题库缺题才回退 LLM 现生成。数字判断题有硬校验：题干数字必须能在法条/结论原文中找到。
+
+### TTS 质检与修复（在 `backend/` 下执行）
+
+```bash
+.venv/bin/python scripts/audit_tts.py --report ../docs/superpowers/research/2026-09-20-TTS质检报告.md
+.venv/bin/python scripts/repair_tts.py                    # dry-run
+.venv/bin/python scripts/repair_tts.py --apply            # 重合成异常/陈旧录音
+.venv/bin/python scripts/repair_tts.py --apply --backfill # 给健康音频补台账
 ```
 
 产物入库为 `draft`，人工抽检后加 `--publish`（只发布该题型）转为 `published`。
