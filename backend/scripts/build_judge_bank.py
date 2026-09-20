@@ -23,9 +23,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import ai, config, db, number_terms, quiz_bank  # noqa: E402
+from app import (ai, config, db, number_terms, quiz_bank, statute_index,  # noqa: E402
+                 statutes)
 
 SYSTEM = "你是法考客观题教练，正在为考生出「数字判断题」（只判断对错，不设选项）。"
+POLARITY_HINT = {
+    "auto": "",
+    "true": "**本题必须是一句正确的陈述**（答案「对」）：数字与原文完全一致。\n",
+    "false": "**本题必须是一句错误的陈述**（答案「错」）："
+             "只能改写一处数字（改大、改小或换成相邻期限），其余与原文一致。\n",
+}
 _ARTICLE_RE = re.compile(r"(?m)^\s*(第[〇零一二三四五六七八九十百千万0-9]+条)[　\s]*(.*)$")
 
 SUBJECT_RULES: list[tuple[str, str]] = [
@@ -68,6 +75,20 @@ SUBJECT_RULES: list[tuple[str, str]] = [
     ("公约", "三国法"), ("协定", "三国法"), ("宪章", "三国法"), ("规约", "三国法"),
     ("议定书", "三国法"), ("通则", "三国法"), ("惯例", "三国法"), ("条约", "三国法"),
     ("涉外民事关系", "三国法"),
+    # 补充规则（2026-09-20 覆盖率审计后补登：以下 32 部法原先没有科目归属）
+    ("保障措施条例", "三国法"), ("反倾销条例", "三国法"), ("反补贴条例", "三国法"),
+    ("争端解决规则", "三国法"), ("外国国家豁免法", "三国法"), ("引渡法", "三国法"),
+    ("反外国不当域外管辖", "三国法"),
+    ("信息网络传播权", "商经知劳环"), ("垄断", "商经知劳环"), ("排水", "商经知劳环"),
+    ("污水", "商经知劳环"), ("民营经济", "商经知劳环"),
+    ("行政申请再审", "行政法"), ("检察公益诉讼", "行政法"),
+    ("减刑", "刑诉"), ("假释", "刑诉"), ("在押犯罪嫌疑人", "刑诉"),
+    ("妨害信用卡", "刑法"), ("掩饰、隐瞒犯罪所得", "刑法"), ("扰乱无线电", "刑法"),
+    ("伪劣商品", "刑法"), ("行贿", "刑法"), ("交通肇事", "刑法"),
+    ("非法集资", "刑法"), ("性侵害未成年人", "刑法"), ("醉酒危险驾驶", "刑法"),
+    ("公证活动", "民法"), ("民商事审判工作会议纪要", "民法"),
+    ("国家发展规划法", "理论法"), ("民族团结进步促进法", "理论法"),
+    ("香港特别行政区", "理论法"), ("澳门特别行政区", "理论法"),
 ]
 
 
@@ -127,6 +148,25 @@ def covered_basis(conn) -> set[str]:
 
 
 _BASIS_NO_RE = re.compile(r"第[〇零一二三四五六七八九十百千万0-9]+条.*$")
+#: 早期版本把条号写成阿拉伯数字后缀（如「…公约）9」），需要单独兼容
+_BASIS_INT_SUFFIX_RE = re.compile(r"^(?P<law>.+?)(?P<no>\d+)$")
+
+
+def canonical_basis(basis: str) -> str | None:
+    """把任意写法的 basis 规范成「法条库主名+条号」；解析不到返回 None。"""
+    located = statutes.resolve_law_article(basis)
+    if located is None:
+        m = _BASIS_INT_SUFFIX_RE.match(basis or "")
+        if m:
+            path = statutes.resolve_law_file(m.group("law").strip())
+            if path is not None:
+                located = (path.stem, int(m.group("no")), 0)
+    if located is None:
+        return None
+    law_key, no, sub = located
+    law = statute_index.load_library().get(law_key)
+    article = law.article(no, sub) if law else None
+    return f"{law_key}{article.label}" if article else None
 
 
 def fix_subjects(conn) -> int:
@@ -143,6 +183,25 @@ def fix_subjects(conn) -> int:
         if subject and subject != row["subject"]:
             conn.execute("UPDATE quizzes SET subject=? WHERE id=?",
                          (subject, row["id"]))
+            fixed += 1
+    conn.commit()
+    return fixed
+
+
+def fix_basis(conn) -> int:
+    """把法条侧判断题的 basis 规范成「法条库主名 + 条号」（覆盖率统计/法条跳转依赖它）。"""
+    library = statute_index.load_library()
+    rows = conn.execute(
+        "SELECT id, basis FROM quizzes WHERE origin=? AND entry_id IS NULL",
+        (quiz_bank.ORIGIN_JUDGE,)).fetchall()
+    fixed = 0
+    for row in rows:
+        canonical = canonical_basis(row["basis"])
+        if canonical is None:
+            continue
+        if canonical != row["basis"]:
+            conn.execute("UPDATE quizzes SET basis=? WHERE id=?",
+                         (canonical, row["id"]))
             fixed += 1
     conn.commit()
     return fixed
@@ -172,20 +231,63 @@ def entry_candidates(conn, limit: int) -> list[dict]:
     return out[:limit] if limit else out
 
 
-def judge_prompt(reference: str, hint: str) -> str:
-    return (
-        "下面是一段法考依据原文。请据此出一道「数字判断题」，只考数量/金额/年限/"
-        "人数/期限/比例这类数字细节。约束：\n"
+def counterpart_candidates(conn, limit: int = 0) -> list[dict]:
+    """已有「对」题但还没有「错」题的法条/条目 → 补「错」题，配平答案分布。
+
+    判断题的幂等键是 (origin, qtype, entry_id, answer)，同一条目/法条可以
+    「对」「错」各留一题，形成配对训练。
+    """
+    rows = conn.execute(
+        "SELECT basis, entry_id, answer FROM quizzes WHERE origin=?",
+        (quiz_bank.ORIGIN_JUDGE,)).fetchall()
+    true_statute = {r["basis"] for r in rows if r["answer"] == "对"
+                    and not r["entry_id"] and r["basis"]}
+    false_statute = {r["basis"] for r in rows if r["answer"] == "错"
+                     and not r["entry_id"]}
+    true_entry = {r["entry_id"] for r in rows if r["answer"] == "对" and r["entry_id"]}
+    false_entry = {r["entry_id"] for r in rows if r["answer"] == "错" and r["entry_id"]}
+    library = statute_index.load_library()
+    out: list[dict] = []
+    for basis in sorted(true_statute - false_statute):
+        located = statutes.resolve_law_article(basis)
+        if located is None:
+            continue
+        law_key, no, sub = located
+        law = library.get(law_key)
+        article = law.article(no, sub) if law else None
+        if article is None:
+            continue
+        out.append({"law": law_key, "no": no, "sub": sub, "text": article.text,
+                    "subject": subject_of(law_key) or "", "polarity": "false"})
+    for entry_id in sorted(true_entry - false_entry):
+        row = conn.execute(
+            "SELECT id, subject, submodule, point, anchor, conclusion, statutes"
+            " FROM entries WHERE id=?", (entry_id,)).fetchone()
+        if row is None:
+            continue
+        out.append({"entry_id": row["id"], "subject": row["subject"],
+                    "point": row["point"], "anchor": row["anchor"],
+                    "conclusion": row["conclusion"],
+                    "statutes": json.loads(row["statutes"] or "[]"),
+                    "polarity": "false"})
+    return out[:limit] if limit else out
+
+
+def judge_prompt(reference: str, hint: str, polarity: str = "auto") -> str:
+    rules = (
         "- stem：一句话陈述句，15~40 字，直接给出一个可判对错的数字结论\n"
         "- answer：\"对\" 或 \"错\"；出「错」题时只改一处数字，其余与原文一致\n"
         "- analysis：30~60 字，点明正确数值与依据\n"
         "- basis：法名+条号（如「刑诉法第91条」），没有则空串\n"
         "只输出 JSON：{\"stem\":\"...\",\"answer\":\"对\",\"analysis\":\"...\","
-        "\"basis\":\"...\"}\n\n依据原文：\n" + reference + ("\n\n参考条目：" + hint if hint else "")
+        "\"basis\":\"...\"}\n\n依据原文：\n"
     )
+    head = ("下面是一段法考依据原文。请据此出一道「数字判断题」，只考数量/金额/年限/"
+            "人数/期限/比例这类数字细节。约束：\n" + POLARITY_HINT.get(polarity, ""))
+    return head + rules + reference + ("\n\n参考条目：" + hint if hint else "")
 
 
-def build_one(item: dict) -> tuple[dict, dict | None, str]:
+def build_one(item: dict, polarity: str = "auto") -> tuple[dict, dict | None, str]:
     # 条目侧的题干来自「场景 + 结论」，场景里的数字（判几年、几个月）也属合法依据，
     # 因此校验原文用两者拼接；法条侧直接用条文正文。
     reference = item.get("text") or f"{item['anchor']}。{item['conclusion']}"
@@ -194,7 +296,8 @@ def build_one(item: dict) -> tuple[dict, dict | None, str]:
         hint = f"{item['point']}（场景：{item['anchor']}）"
         if item.get("statutes"):
             hint += "；关联法条：" + "、".join(item["statutes"][:2])
-    raw = ai.call_llm(SYSTEM, judge_prompt(reference, hint), temperature=0.5,
+    raw = ai.call_llm(SYSTEM, judge_prompt(reference, hint, item.get("polarity", polarity)),
+                      temperature=0.5,
                       max_tokens=300)
     quiz = _parse(raw)
     if quiz is None:
@@ -229,20 +332,28 @@ def _parse(raw: str | None) -> dict | None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="生成数字判断题题库")
-    ap.add_argument("--source", choices=["statutes", "entries", "both"],
+    ap.add_argument("--source", choices=["statutes", "entries", "both", "counterparts"],
                     default="both")
+    ap.add_argument("--polarity", choices=["auto", "true", "false"], default="auto",
+                    help="强制出「对」题或「错」题（counterparts 源固定为错题）")
     ap.add_argument("--per-law", type=int, default=3, help="每部法条最多取几条")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--publish", action="store_true")
     ap.add_argument("--fix-subjects", action="store_true",
                     help="按 basis 里的法名重算科目（法条侧题库科目口径修正）")
+    ap.add_argument("--fix-basis", action="store_true",
+                    help="把法条侧 basis 规范成「法条库主名+条号」")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
     conn = db.connect()
     if args.fix_subjects:
         print(f"已修正 {fix_subjects(conn)} 题科目")
+        conn.close()
+        return 0
+    if args.fix_basis:
+        print(f"已规范 {fix_basis(conn)} 题 basis")
         conn.close()
         return 0
     if args.publish:
@@ -261,6 +372,10 @@ def main(argv=None) -> int:
         entries = entry_candidates(conn, args.limit)
         print(f"条目候选 {len(entries)} 条")
         items += entries
+    if args.source == "counterparts":
+        counterparts = counterpart_candidates(conn, args.limit)
+        print(f"配对补「错」题候选 {len(counterparts)} 条")
+        items += counterparts
     if args.limit:
         items = items[:args.limit]
     if args.dry_run:
@@ -274,15 +389,21 @@ def main(argv=None) -> int:
     ok = fail = 0
     start = time.time()
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
-        for i, (item, quiz, why) in enumerate(pool.map(build_one, items), 1):
+        for i, (item, quiz, why) in enumerate(
+                pool.map(lambda it: build_one(it, args.polarity), items), 1):
             if quiz is None or why:
                 fail += 1
                 print(f"[{i}/{len(items)}] FAIL {why} | "
                       f"{(quiz or {}).get('stem', '')[:40]}")
                 continue
-            # 法条侧统一用「法名+条号」的规范写法，便于去重与前端跳转
-            basis = (f"{item['law']}{item['no']}" if item.get("law")
-                     else quiz["basis"])
+            # 法条侧统一用「法条库主名+条号」的规范写法，便于去重、统计与前端跳转
+            basis = quiz["basis"]
+            if item.get("law"):
+                law = statute_index.load_library().get(item["law"])
+                article = (law.article(item["no"], item.get("sub", 0))
+                           if law else None)
+                if article is not None:
+                    basis = f"{item['law']}{article.label}"
             quiz_bank.save_question(
                 conn, qtype="judge", origin=quiz_bank.ORIGIN_JUDGE,
                 entry_id=item.get("entry_id"), subject=item["subject"],

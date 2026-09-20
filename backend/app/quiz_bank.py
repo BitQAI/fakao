@@ -42,13 +42,24 @@ def _row_to_question(row) -> dict:
 
 
 def find_question(conn, *, origin: str, qtype: str, entry_id: str | None,
-                  text_hash: str) -> dict | None:
-    """按 (origin, entry_id, qtype) 或 (origin, qtype, text_hash) 查同题。"""
+                  text_hash: str, answer: str = "") -> dict | None:
+    """按 (origin, entry_id, qtype[, answer]) 或 (origin, qtype, text_hash) 查同题。
+
+    判断题额外带 answer：同一条目/法条允许「对」「错」各一题（配对训练）。
+    """
+    by_answer = " AND answer=?" if qtype == "judge" and answer else ""
     if entry_id:
         row = conn.execute(
             "SELECT id, text_hash FROM quizzes WHERE origin=? AND qtype=? AND entry_id=?"
-            " ORDER BY id LIMIT 1", (origin, qtype, entry_id)).fetchone()
+            + by_answer + " ORDER BY id LIMIT 1",
+            (origin, qtype, entry_id, *([answer] if by_answer else []))).fetchone()
     else:
+        if by_answer:
+            row = conn.execute(
+                "SELECT id, text_hash FROM quizzes WHERE origin=? AND qtype=?"
+                " AND text_hash=? AND answer=? ORDER BY id LIMIT 1",
+                (origin, qtype, text_hash, answer)).fetchone()
+            return dict(row) if row else None
         row = conn.execute(
             "SELECT id, text_hash FROM quizzes WHERE origin=? AND qtype=? AND text_hash=?"
             " ORDER BY id LIMIT 1", (origin, qtype, text_hash)).fetchone()
@@ -67,7 +78,7 @@ def save_question(conn, *, qtype: str, origin: str, stem: str, answer: str,
     options = options or []
     text_hash = db.question_hash(stem, answer, options)
     existing = find_question(conn, origin=origin, qtype=qtype, entry_id=entry_id,
-                             text_hash=text_hash)
+                             text_hash=text_hash, answer=answer)
     if existing is not None:
         if existing["text_hash"] == text_hash or not replace:
             return existing["id"]

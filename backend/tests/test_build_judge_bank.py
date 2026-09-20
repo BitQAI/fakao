@@ -71,6 +71,48 @@ def test_covered_basis_reads_existing_questions(tmp_db):
     assert json.dumps({})  # 保持 import 语义明确（json 用于其他断言场景）
 
 
+def test_canonical_basis_normalizes_both_forms():
+    """basis 规范成「法条库主名+条号」：兼容「刑诉法91条」与早期的阿拉伯数字后缀写法。"""
+    assert bjb.canonical_basis("刑诉法91条") == "中华人民共和国刑事诉讼法第九十一条"
+    assert bjb.canonical_basis("中华人民共和国刑法第二百六十九条") == \
+        "中华人民共和国刑法第二百六十九条"
+    # 早期 counterparts 产物写成「<法条库主名><数字>」
+    assert bjb.canonical_basis("中华人民共和国刑事诉讼法91") == \
+        "中华人民共和国刑事诉讼法第九十一条"
+    assert bjb.canonical_basis("不存在的法第9条") is None
+    assert bjb.canonical_basis("民法典") is None
+
+
+def test_counterpart_candidates_pairs_false_questions(tmp_db):
+    """已有「对」题的法条，应被选为「错」题配对候选。"""
+    from app import db, importer
+
+    db_path, _ = tmp_db
+    conn = db.connect(db_path)
+    importer.import_payload(conn, {
+        "schema": "fakao-entry/1.0", "status": "final", "generated_at": "x", "count": 1,
+        "entries": [{
+            "id": "XF-001", "subject": "刑法", "submodule": "总则", "point": "追诉时效",
+            "anchor": "甲犯罪后经过五年，案件事实完整描述",
+            "conclusion": "法定最高刑不满五年的，追诉时效为五年。",
+            "priority": "高频考点", "rationale": "x",
+            "sources": [{"type": "高频", "ref": "刑法-高频考点.md",
+                         "loc": "犯盗窃、诈骗、抢夺罪，为窝藏赃物、抗拒抓捕或者毁灭罪证而当场使用暴力"}],
+            "statutes": [], "note": None, "tts_override": None, "tts_text": "文本。"}]})
+    # 条目侧：已有「对」题 → 需要补「错」题
+    quiz_bank.save_question(conn, qtype="judge", origin=quiz_bank.ORIGIN_JUDGE,
+                            entry_id="XF-001", subject="刑法", stem="追诉时效为五年。",
+                            answer="对", status="published")
+    items = bjb.counterpart_candidates(conn)
+    assert [i.get("entry_id") for i in items] == ["XF-001"]
+    # 补上「错」题后不再重复候选
+    quiz_bank.save_question(conn, qtype="judge", origin=quiz_bank.ORIGIN_JUDGE,
+                            entry_id="XF-001", subject="刑法", stem="追诉时效为十年。",
+                            answer="错", status="published")
+    assert bjb.counterpart_candidates(conn) == []
+    conn.close()
+
+
 @pytest.mark.parametrize("payload,expected", [
     ('{"stem":"拘留后应当在三日内提请批准逮捕，不得延长。","answer":"对",'
      '"analysis":"依据刑诉法第91条，拘留后三日以内提请批准。","basis":"刑诉法91条"}',

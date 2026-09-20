@@ -70,12 +70,14 @@ def check_quiz(quiz: dict, entry: dict) -> list[str]:
     if len((quiz.get("stem") or "").strip()) < 8:
         errs.append("题干过短")
     conclusion = entry.get("conclusion") or ""
+    # 正确项也可能对应「场景」里的事实（判几年、几个月），场景与结论任一命中即可
+    reference = (conclusion + (entry.get("anchor") or "")).strip()
     if answer and not errs:
         picked = [options[ord(ch) - 65] for ch in answer
                   if 0 <= ord(ch) - 65 < len(options)]
         # 多选题的正确项会拆分结论句，因此只要有任一项与结论对得上即可
-        if not any(_overlap(text, conclusion) or _same_numbers(text, conclusion)
-                   or _similar(text, conclusion)
+        if not any(_overlap(text, conclusion) or _same_numbers(text, reference)
+                   or _similar(text, conclusion) or _overlap(text, reference)
                    for text in picked):
             errs.append("正确项与条目结论无明显对应")
     return errs
