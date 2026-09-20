@@ -139,6 +139,32 @@ curl -s localhost:8090/api/quiz/bank/stats
 判断题分两类，用 `quizzes.variant` 区分：`number` 数字型 / 17 个关系词族（`modal`、`form`、
 `instance`、`review`…）关系型；`status` 新增 `archived`＝下架（保留行与答题历史）。
 
+### 3.5c 法条题卡（条目化，2026-09-20 新增）
+
+法条驱动**客观题**会被重建为「卡片条目」：`entries.kind='card'`、ID 形如 `XF-Q000162`，
+题干/选项/答案/解析/条文摘要/朗读文本全部落在条目字段里，于是看背/听学/标记/自评/音频
+复用同一条代码路径（**不新增表**）。判断题不进看背/听学（只在自测、数字判断专项、法条页）。
+
+```bash
+# 题库每次 --publish 之后重建卡片（幂等，约 1.5s / 1.2 万张）
+.venv/bin/python scripts/sync_card_entries.py
+.venv/bin/python scripts/sync_card_entries.py --dry-run   # 只看将新建/更新/清理多少
+
+# 四入口覆盖审计（缺口必须为 0 且卡片与客观题 1:1）
+.venv/bin/python scripts/audit_quiz_entrypoints.py \
+  --report ../docs/superpowers/research/2026-09-20-法条题入口覆盖报告.md
+```
+
+**条目空间隔离（重要）**：`v_entries` 视图 = `entries WHERE kind='entry'`。
+一切按「条目语义」的读取（调度、搜索、覆盖树、覆盖率、批量 TTS、出题脚本）必须走
+`v_entries`；需要看见卡片的读取（看背/听学队列、标记、`/api/audio/{id}`、审阅历史、错题本）
+直接读 `entries`。新增查询时先想清楚属于哪一侧，判定口径见
+`docs/superpowers/specs/2026-09-20-法条题卡条目化统一-design.md` §3。
+
+卡片 priority 统一「普通」、不强制混排：看背按调度器排序、听学按「未听优先 → 优先级」，
+高优先级条目学完自然轮到卡片（自定义范围可用「内容：法条题卡」+「按法条题卡选择」直接刷）。
+卡片文本由题库派生，**不支持在「看背」里就地编辑**（改了会被下次同步覆盖）。
+
 **数字判断题的硬闸门**（`app/number_terms.py`）：「对」题的数字必须全部能在依据原文
 （法条 / 条目结论）中找到；「错」题只允许改写一处数字。不满足即丢弃，避免编造数字。
 中文数字与阿拉伯数字折算后比较（「三十日」==「30日」），「以内」与「内」等价，
