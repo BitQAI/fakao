@@ -12,6 +12,7 @@ import { useAiShortcut } from "@/lib/aiShortcut";
 import CustomRangePicker, { type CustomRange } from "./CustomRangePicker";
 import SourceViewer, { type SourceTarget } from "./SourceViewer";
 import { ListenMarksPanel } from "./ListenMarksPanel";
+import ListenCardView from "./ListenCardView";
 import { loadListenInitial, LISTEN_PAGE, LISTEN_THRESHOLD } from "@/lib/listenInit";
 
 const QUEUE_STORE_KEY = "fakao.listen.queue.v1";
@@ -20,6 +21,7 @@ export default function ListenView() {
   const searchParams = useSearchParams();
   const [queue, setQueue] = useState<ListenPayload | null>(null);
   const [idx, setIdx] = useState(0);
+  const [cardIdx, setCardIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -231,6 +233,21 @@ export default function ListenView() {
   }
 
   const entry: Entry = items[idx];
+  // 每听完 3 段插 1 张法条题卡（队列会自动续批，排到队尾就永远轮不到）
+  const cards = queue.statute_cards ?? [];
+  const dueCards = Math.floor(idx / 3);
+  if (cardIdx < dueCards && cardIdx < cards.length) {
+    return (
+      <div className="page-box">
+        <ListenCardView
+          card={cards[cardIdx]}
+          index={cardIdx}
+          total={cards.length}
+          onNext={() => setCardIdx((i) => i + 1)}
+        />
+      </div>
+    );
+  }
   if (idx >= items.length) {
     return (
       <div className="page-box">

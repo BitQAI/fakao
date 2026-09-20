@@ -67,9 +67,12 @@ def regenerate_plan(conn=Depends(db.get_db)):
 
 @router.get("/listen")
 def listen(limit: int = 10, conn=Depends(db.get_db)):
+    """听学队列：条目音频 + 每 3 段留 1 段法条题卡（音频按需合成）。"""
     limit = min(max(int(limit), 1), 50)
     data = service.listen_queue(conn, limit=limit)
     data["generating"] = service.ensure_listen_pool(conn)
+    data["statute_cards"] = statute_cards.pool(
+        conn, mode="listen", limit=max(1, limit // 3))
     return data
 
 

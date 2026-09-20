@@ -173,3 +173,12 @@ def for_plan(conn, plan: dict, mode: str = "read") -> list[dict]:
     focus = list(dict.fromkeys(
         it["subject"] for it in plan.get("items", []) if it.get("subject")))
     return pool(conn, subjects=focus or None, mode=mode, limit=quota)
+
+
+def card_by_id(conn, quiz_id: int) -> dict | None:
+    """按 quiz_id 取一张法条卡（听学音频按需合成时用）。"""
+    row = conn.execute(f"SELECT {_COLS} FROM quizzes WHERE id=?",
+                       (quiz_id,)).fetchone()
+    if row is None:
+        return None
+    return _to_card(row, statute_index.load_library(config.STATUTE_DIR))

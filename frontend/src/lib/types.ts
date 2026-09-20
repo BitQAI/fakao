@@ -95,6 +95,8 @@ export interface ListenPayload {
   generating: boolean;
   custom?: boolean;
   heard_total?: number;
+  /** 听学用的法条题卡（每 3 段留 1 段，音频按需合成） */
+  statute_cards?: StatuteCard[];
 }
 
 export interface HistoryItem {
