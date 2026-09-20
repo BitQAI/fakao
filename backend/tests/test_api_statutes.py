@@ -82,5 +82,25 @@ def test_existing_single_statute_endpoint_unchanged(client):
     assert "正当防卫" in data["text"]
 
 
+def test_statute_questions_are_attached_to_the_article(client, tmp_path):
+    """法条页挂题：该条的题目能被取到（含条文原文）；无题条返回空表不报错。"""
+    from app import quiz_bank
+
+    conn = db.connect(tmp_path / "statutes.db")
+    quiz_bank.save_question(
+        conn, qtype="choice", origin=quiz_bank.ORIGIN_BANK, entry_id=None,
+        subject="刑法", stem="法条题：正当防卫的限度如何判断？",
+        options=["A. 甲", "B. 乙"], answer="A", analysis="解析",
+        basis="中华人民共和国刑法第二十条", status="published")
+    conn.close()
+
+    items = client.get("/api/statute/questions",
+                       params={"law": "中华人民共和国刑法", "no": 20}).json()["items"]
+    assert [i["basis"] for i in items] == ["中华人民共和国刑法第二十条"]
+    assert "正当防卫" in items[0]["article_text"]
+
+    empty = client.get("/api/statute/questions",
+                       params={"law": "中华人民共和国刑法", "no": 9999}).json()["items"]
+    assert empty == []
 def test_index_cache_reusable(client):
     assert si.load_library()["中华人民共和国刑法"].article(232) is not None

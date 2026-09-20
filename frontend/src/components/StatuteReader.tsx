@@ -4,6 +4,7 @@ import { getJson } from "@/lib/api";
 import type {
   StatuteArticle, StatuteEntryRef, StatuteLawPayload,
 } from "@/lib/statuteTypes";
+import StatuteQuizPanel from "./StatuteQuizPanel";
 
 /** 条文渲染：编/章/节分组、款分行、项缩进、条号双显、展开看反向索引。 */
 export default function StatuteReader({
@@ -125,6 +126,7 @@ function ArticleRow({
               </button>
             ))}
           </div>
+          <StatuteQuizPanel lawKey={lawKey} no={art.no} sub={art.sub} />
         </div>
       )}
     </div>

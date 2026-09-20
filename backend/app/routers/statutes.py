@@ -1,7 +1,7 @@
-"""法条检索 API：法名清单、目录与条文、全文检索、条目反向索引。"""
+"""法条检索 API：法名清单、目录与条文、全文检索、条目反向索引、该条题目。"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app import db, statute_index
+from app import db, statute_cards, statute_index
 
 router = APIRouter(prefix="/api", tags=["statutes"])
 
@@ -34,3 +34,12 @@ def statute_entries(law: str, no: int = Query(..., ge=1),
                     conn=Depends(db.get_db)):
     """反向索引：引用了「该法该条」的考点条目。"""
     return {"items": statute_index.entries_for(conn, law, no)}
+
+
+@router.get("/statute/questions")
+def statute_questions(law: str, no: int = Query(..., ge=1),
+                      sub: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=30),
+                      conn=Depends(db.get_db)):
+    """法条页挂题：基于「该法该条」命制的法条驱动题（可就地作答）。"""
+    items = statute_cards.by_article(conn, law, no, sub, limit=limit)
+    return {"items": items, "total": len(items)}
