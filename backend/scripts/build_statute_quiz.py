@@ -19,6 +19,7 @@
 import argparse
 import collections
 import json
+import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -102,6 +103,32 @@ def quota_candidates(conn, per_law: int, laws: list[str] | None = None) -> list[
     return out
 
 
+def target_candidates(conn, ratio: float,
+                      laws: list[str] | None = None) -> list[dict]:
+    """按目标覆盖率反推每部法的缺口条文（数字/要件型优先）。
+
+    统一配额（`--per-law`）在大法典上追不上目标：民法典 1260 条、生态环境法典 1242 条、
+    人民检察院刑事诉讼规则 684 条。这里按「需要 = ceil(ratio × 条数) − 已覆盖」
+    逐法算缺口，小法不再重复占配额。
+    """
+    covered = covered_map(conn)
+    out = []
+    for key, law in statute_index.load_library().items():
+        if laws and not any(token in key for token in laws):
+            continue
+        articles = {(a.no, a.sub): a for a in law.articles}
+        have = covered.get(key, set()) & set(articles)
+        need = math.ceil(ratio * len(articles)) - len(have)
+        if need <= 0:
+            continue
+        missing = [a for pk, a in articles.items() if pk not in have]
+        missing.sort(key=lambda a: -_score_article(a.text))
+        for article in missing[:need]:
+            out.append({"law": key, "no": article.no, "sub": article.sub,
+                        "cites": 0})
+    return out
+
+
 def _article(key: str, no: int, sub: int):
     law = statute_index.load_library().get(key)
     return law.article(no, sub) if law else None
@@ -177,6 +204,8 @@ def _parse(raw: str | None) -> dict | None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="从法条库生成客观题")
     ap.add_argument("--per-law", type=int, default=3, help="每部法补题配额")
+    ap.add_argument("--target-ratio", type=float, default=0.0,
+                    help="按目标覆盖率反推每部法缺口（0=改用 --per-law 统一配额）")
     ap.add_argument("--laws", default=None,
                     help="只补这些法（按文件名子串匹配，逗号分隔）")
     ap.add_argument("--limit", type=int, default=0)
@@ -197,7 +226,13 @@ def main(argv=None) -> int:
 
     cited = cited_candidates(conn)
     laws = [x.strip() for x in args.laws.split(",") if x.strip()] if args.laws else None
-    quota = [] if args.only_cited else quota_candidates(conn, args.per_law, laws)
+    if args.only_cited:
+        quota = []
+    elif args.target_ratio > 0:
+        quota = target_candidates(conn, args.target_ratio, laws)
+        print(f"目标覆盖率 {args.target_ratio:.0%}：每部法缺口合计 {len(quota)} 条")
+    else:
+        quota = quota_candidates(conn, args.per_law, laws)
     items = cited if args.only_cited else cited + quota
     # 去重（同一法条可能同时出现在 A/B 两类候选里）
     seen = set()
