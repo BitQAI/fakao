@@ -68,6 +68,38 @@ STATUTE_ALIASES = {
     "交通肇事解释": "最高人民法院关于审理交通肇事刑事案件具体应用法律若干问题的解释",
     "非法集资解释": "最高人民法院关于审理非法集资刑事案件具体应用法律若干问题的解释",
     "行政协议规定": "最高人民法院关于审理行政协议案件若干问题的规定",
+    # 国际条约 / 教材常用简称（2026-09-20 覆盖率审计后补登）
+    "CISG": "联合国国际货物销售合同公约",
+    "联合国销售合同公约": "联合国国际货物销售合同公约",
+    "TRIPS协定": "与贸易有关的知识产权协定",
+    "TRIPS": "与贸易有关的知识产权协定",
+    "UCP600": "跟单信用证统一惯例（UCP600）",
+    "伯尔尼公约": "保护文学和艺术作品伯尔尼公约",
+    "巴黎公约": "保护工业产权巴黎公约",
+    "罗马公约": "保护表演者、录音制品制作者和广播组织罗马公约",
+    "录音制品公约": "保护录音制品制作者防止未经许可复制其录音制品公约",
+    "纽约公约": "承认及执行外国仲裁裁决公约",
+    "华盛顿公约": "关于解决国家和他国国民之间投资争端公约",
+    "海牙规则": "统一提单的若干法律规则的国际公约",
+    "维斯比规则": "修改统一提单若干法律规则的国际公约的议定书",
+    "GATT": "关税及贸易总协定",
+    "日内瓦四公约": "1949年日内瓦四公约",
+    "海洋法公约": "联合国海洋法公约",
+    "联合国宪章": "联合国宪章",
+    # 常用简称与司法解释
+    "法律适用法": "中华人民共和国涉外民事关系法律适用法",
+    "涉外民事关系法律适用法": "中华人民共和国涉外民事关系法律适用法",
+    "选举法": "中华人民共和国全国人民代表大会和地方各级人民代表大会选举法",
+    "香港基本法": "中华人民共和国香港特别行政区基本法",
+    "澳门基本法": "中华人民共和国澳门特别行政区基本法",
+    "香港驻军法": "中华人民共和国香港特别行政区驻军法",
+    "澳门驻军法": "中华人民共和国澳门特别行政区驻军法",
+    "环保法": "中华人民共和国环境保护法",
+    "买卖合同解释": "最高人民法院关于审理买卖合同纠纷案件适用法律问题的解释",
+    "民间借贷司法解释": "最高人民法院关于审理民间借贷案件适用法律若干问题的规定",
+    "醉驾意见": "最高人民法院、最高人民检察院、公安部、司法部关于办理醉酒危险驾驶刑事案件的意见",
+    "性侵害未成年人案件办理规定（2023年）":
+        "最高人民法院、最高人民检察院、公安部、司法部关于办理性侵害未成年人刑事案件的意见",
 }
 
 #: 条目写法里的限定词后缀，解析失败时逐个剥离后重试（如「公司法（2023）」→「公司法」）
@@ -80,6 +112,8 @@ _BRACKETS = str.maketrans({"〈": "《", "〉": "》", "＜": "《", "＞": "》
 def _law_candidates(law: str) -> list[str]:
     """法名写法候选：原文 + 逐个剥离限定词后缀。"""
     law = (law or "").translate(_BRACKETS)
+    # 去掉书名号：条目/模型常写「《维也纳条约法公约》」，而文件主名不带书名号
+    law = law.strip().strip("《》〈〉").strip()
     out = [law]
     cur = law
     for suffix in _QUALIFIER_SUFFIXES:
@@ -164,17 +198,34 @@ def resolve_statute(text: str) -> str | None:
     条号后的款/项/目后缀忽略（返回整条正文）；解析不到返回 None。"""
     if text in _STATUTE_CACHE:
         return _STATUTE_CACHE[text]
+    located = resolve_law_article(text)
+    body = None
+    if located is not None:
+        law_key, num, sub = located
+        path = config.STATUTE_DIR / f"{law_key}.md"
+        if path.exists():
+            body = parse_law_file(path).get((num, sub))
+    _STATUTE_CACHE[text] = body
+    return body
+
+
+def resolve_law_article(text: str) -> tuple[str, int, int] | None:
+    """把「刑诉法91条」「中华人民共和国专利法第九条」「刑法287条之二」定位到法条库。
+
+    返回 (法条库文件主名, 条号, 子条号)；解析不到返回 None。
+    条目 statutes 与题目 basis 两种写法都支持，是覆盖率统计的基础。
+    """
+    if not text:
+        return None
     m = _ARTICLE_RE.search(text)
     if not m:
-        _STATUTE_CACHE[text] = None
         return None
     law = text[: m.start()].strip()
     num = _cn2int(m.group("num"))
     sub = _cn2int(m.group("sub")[1:]) if m.group("sub") else 0
-    body = None
-    if law and num is not None:
-        path = resolve_law_file(law)
-        if path is not None:
-            body = parse_law_file(path).get((num, sub))
-    _STATUTE_CACHE[text] = body
-    return body
+    if not law or num is None:
+        return None
+    path = resolve_law_file(law)
+    if path is None:
+        return None
+    return path.stem, num, sub
