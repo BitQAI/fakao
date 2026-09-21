@@ -28,21 +28,43 @@ vi .env   # 填入 DEEPSEEK_API_KEY
           # 听学 TTS 另填 DASHSCOPE_API_KEY（千问 qwen-tts 链，音色 Ethan；TTS_MODELS/TTS_VOICE/TTS_SPEED 可配）
 ```
 
-3. 后端安装与导入数据：
+3. 后端安装与数据准备：
 
 ```bash
 cd /opt/fakao/backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python scripts/import_entries.py data/entries/*.json
-.venv/bin/python scripts/load_cases.py   # 案例原文查询；见下方「案例数据说明」
 ```
 
-> **案例数据说明**：`data/案例数据/`（约 69MB）与 `data/案例库统一/documents/`
-> 均被 .gitignore 排除。若要使用看背/听学的「案例原文」功能，需在服务器上
-> 上传这两份目录（或仅上传 documents/），再运行
-> `.venv/bin/python scripts/load_cases.py`。不装也不影响其余功能，仅案例原文
-> 显示「原文不可用」。
+数据库二选一：
+
+**A. 直接上传现成库（推荐）**：把本机 `data/fakao.db`（约 170MB，已含 2426 条目 /
+12052 法条题卡 / 7172 案例 / 1.4 万客观题 + 2.5 万判断题 / TTS 台账 / 学习记录）
+传到服务器，`data/` 下放好即可，无需再导入。
+
+**B. 从仓库 JSON 重建（git 是权威来源）**：
+
+```bash
+.venv/bin/python scripts/import_entries.py ../data/entries/*.json
+.venv/bin/python -c "from app import db; c=db.connect(); print(c.execute(\"UPDATE entries SET status='final' WHERE status='draft'\").rowcount); c.commit(); c.close()"
+.venv/bin/python scripts/import_quiz_bank.py ../data/quiz_bank   # 客观题 + 判断题题库
+.venv/bin/python scripts/sync_card_entries.py                    # 题库 → 法条题卡（1.2 万张）
+.venv/bin/python scripts/load_cases.py                           # 案例原文查询，需先传 documents/
+```
+
+> **必须手动上传的部分**（都已 gitignore，`git clone` 拿不到）：
+>
+> | 内容 | 大小 | 是否必需 | 说明 |
+> |---|---|---|---|
+> | `.env` | — | 必需 | DeepSeek / DashScope 密钥 |
+> | `data/fakao.db` | 170MB | 走 A 时必需 | 现成数据库；走 B 时由脚本生成 |
+> | `data/案例库统一/documents/` | 49MB | 可选 | 案例原文 JSONL，`load_cases.py` 的输入 |
+> | `data/案例数据/` | 67MB | 可选 | 上者上游的原始案例素材 |
+> | `data/audio/` | 3.2GB | 可选 | 听学音频缓存；不传则首次播放时按需合成 |
+> | `data/backup/` | 156MB | 不需要 | 本地迁移备份，服务器用不上 |
+>
+> `data/entries/`、`data/quiz_bank/`、`data/法条库/`、`data/案例库统一/index.csv`
+> 已随仓库入库，克隆即有。不传 documents/ 不影响其余功能，仅案例原文显示「原文不可用」。
 
 4. 前端构建（standalone 模式需手动拷贝静态资源）：
 
@@ -147,6 +169,17 @@ cd frontend && npm run dev   # /api 自动代理到 8000
 .venv/bin/python scripts/repair_tts.py                    # dry-run
 .venv/bin/python scripts/repair_tts.py --apply            # 重合成异常/陈旧录音
 .venv/bin/python scripts/repair_tts.py --apply --backfill # 给健康音频补台账
+```
+
+正式条目与法条题卡共用一个音频管线：`--kind card` 切到卡片档（缺音频属「待生成」，
+不驱动批量重合成；坏录音、陈旧、超 30 秒才修）；卡片朗读文本由
+`statute_cards.listen_text()` 生成，上限 110 字（30 秒口径）。
+
+```bash
+.venv/bin/python scripts/audit_tts.py --kind card         # 卡片档：待生成 / 坏录音 / 超 30 秒
+.venv/bin/python scripts/repair_tts.py --kind card --apply
+.venv/bin/python scripts/synthesize_cards.py --queue 200  # 预热听学队列头部（方案 A）
+.venv/bin/python scripts/synthesize_cards.py --all --shard 1/3 --workers 12   # 全量分片并行
 ```
 
 产物入库为 `draft`，人工抽检后加 `--publish`（只发布该题型）转为 `published`。
