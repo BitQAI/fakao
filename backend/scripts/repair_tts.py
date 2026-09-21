@@ -5,8 +5,10 @@
     .venv/bin/python scripts/repair_tts.py --apply             # 执行修复
     .venv/bin/python scripts/repair_tts.py --apply --ids SJ-677,SG-339
     .venv/bin/python scripts/repair_tts.py --apply --backfill  # 仅给健康文件补台账
+    .venv/bin/python scripts/repair_tts.py --kind card         # 法条题卡档（只修坏录音）
 
 安全设计：先取到新音频（内存）才覆盖旧文件——合成失败时旧音频保留，不会失声。
+默认 --kind entry；卡片档不会因「缺音频」批量合成（那是 synthesize_cards.py 的职责）。
 """
 import argparse
 import sys
@@ -20,8 +22,15 @@ from app import config, db, tts, tts_audit  # noqa: E402
 WORKERS = 3
 
 
-def _entries(conn, ids: list[str] | None):
-    sql = ("SELECT id, tts_text FROM v_entries WHERE status='final' AND tts_text != ''")
+def _entries(conn, ids: list[str] | None, kind: str = "entry"):
+    if kind == "entry":
+        sql = ("SELECT id, tts_text FROM v_entries"
+               " WHERE status='final' AND tts_text != ''")
+    else:
+        sql = ("SELECT id, tts_text FROM entries"
+               " WHERE status='final' AND tts_text != ''")
+        if kind == "card":
+            sql += " AND kind='card'"
     params: tuple = ()
     if ids:
         sql += " AND id IN (%s)" % ",".join("?" * len(ids))
@@ -42,11 +51,13 @@ def main(argv=None) -> int:
                     help="只补台账（不重合成）；与 --apply 同用")
     ap.add_argument("--fast", action="store_true", help="质检跳过波形扫描")
     ap.add_argument("--workers", type=int, default=WORKERS)
+    ap.add_argument("--kind", choices=("entry", "card", "all"), default="entry",
+                    help="修复范围：entry 正式条目（默认）/ card 法条题卡 / all")
     args = ap.parse_args(argv)
 
     ids = [x.strip() for x in args.ids.split(",") if x.strip()] if args.ids else None
     conn = db.connect()
-    rows = _entries(conn, ids)
+    rows = _entries(conn, ids, args.kind)
     texts = {r["id"]: r["tts_text"] for r in rows}
 
     if args.backfill:
@@ -62,8 +73,12 @@ def main(argv=None) -> int:
         conn.close()
         return 0
 
-    issues = tts_audit.audit_entries(conn, rows, wave_metrics=not args.fast)
-    summary = tts_audit.summarize(issues)
+    max_duration = (tts_audit.MAX_CARD_DURATION_SEC if args.kind == "card" else 0.0)
+    issues = tts_audit.audit_entries(conn, rows, wave_metrics=not args.fast,
+                                     max_duration_sec=max_duration)
+    repair_kinds = (tts_audit.CARD_REPAIR_KINDS if args.kind == "card"
+                    else tts_audit.DEFAULT_REPAIR_KINDS)
+    summary = tts_audit.summarize(issues, repair_kinds=repair_kinds)
     targets = sorted({i.strip() for i in (ids or [])} | set(summary["repair_ids"]))
     print("质检汇总：" + "，".join(f"{k} {v}" for k, v in summary["counts"].items()))
     print(f"待重合成 {len(targets)} 条"

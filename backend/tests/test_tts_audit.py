@@ -58,6 +58,37 @@ def test_audit_flags_stale_by_manifest(monkeypatch, tmp_path):
     conn.close()
 
 
+def test_summarize_card_kinds_excludes_missing_from_repair():
+    """卡片口径：缺音频是「待生成」，不驱动重合成；坏录音仍要修。"""
+    issues = [tts_audit.Issue(entry_id="XF-Q000001", kind="missing"),
+              tts_audit.Issue(entry_id="XF-Q000002", kind="suspect")]
+    assert tts_audit.summarize(
+        issues, repair_kinds=tts_audit.CARD_REPAIR_KINDS)["repair_ids"] == [
+        "XF-Q000002"]
+    # 条目口径（默认）不变：missing 依旧算待修复
+    assert tts_audit.summarize(issues)["repair_ids"] == [
+        "XF-Q000001", "XF-Q000002"]
+
+
+def test_card_audio_over_30_seconds_flagged_only_in_card_mode(monkeypatch, tmp_path):
+    """30 秒口径只作用于法条题卡：超时进 over_length，条目档不判。"""
+    monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
+    text = "正当防卫。" * 30                  # 150 字 / 31 秒 ≈ 4.84 字每秒（语速正常）
+    _write_wav(config.AUDIO_DIR / "XF-Q000001.wav", seconds=31.0)
+    conn = db.connect(tmp_path / "d.db")
+    rows = [{"id": "XF-Q000001", "tts_text": text}]
+    card_issues = tts_audit.audit_entries(
+        conn, rows, wave_metrics=False,
+        max_duration_sec=tts_audit.MAX_CARD_DURATION_SEC)
+    assert [i.kind for i in card_issues] == ["untracked", "over_length"]
+    assert tts_audit.summarize(
+        card_issues, repair_kinds=tts_audit.CARD_REPAIR_KINDS)["repair_ids"] == [
+        "XF-Q000001"]
+    kinds = {i.kind for i in tts_audit.audit_entries(conn, rows, wave_metrics=False)}
+    assert "over_length" not in kinds         # 条目档不受 30 秒限制
+    conn.close()
+
+
 def test_audit_flags_silent_audio(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     path = config.AUDIO_DIR / "XF-001.wav"

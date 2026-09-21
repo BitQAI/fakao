@@ -403,6 +403,37 @@ def _sort_listen_items(items: list[dict]) -> list[dict]:
     return [t[0] for t in never + heard]
 
 
+def _listen_light_rows(conn, kind: str | None = None):
+    """听学排序所需的轻量字段（不含正文）；kind 限定条目类型，None=条目+卡片。"""
+    sql = """
+        SELECT e.id, e.subject, e.priority, e.kind,
+               (SELECT COUNT(*) FROM reviews r
+                WHERE r.entry_id=e.id AND r.mode='listen') AS listen_count,
+               (SELECT MAX(r.ts) FROM reviews r
+                WHERE r.entry_id=e.id AND r.mode='listen') AS last_ts
+        FROM entries e
+        WHERE e.status='final' AND e.tts_text != ''
+        """
+    if kind:
+        return conn.execute(sql + " AND e.kind=?", (kind,)).fetchall()
+    return conn.execute(sql).fetchall()
+
+
+def listen_card_ids(conn, limit: int = 200, exclude: set[str] | None = None) -> list[str]:
+    """按听学顺序给出前 `limit` 张法条题卡 ID（预合成预热用）。
+
+    排序复用 `_sort_listen_items`，不另写一套；`exclude` 用于跳过已有音频的卡片，
+    避免排序后再截断导致漏预热。
+    """
+    exclude = exclude or set()
+    light = [{"id": r["id"], "subject": r["subject"], "priority": r["priority"],
+              "kind": r["kind"], "listen_count": r["listen_count"],
+              "last_ts": r["last_ts"]}
+             for r in _listen_light_rows(conn, "card") if r["id"] not in exclude]
+    ordered = _sort_listen_items(light)
+    return [x["id"] for x in ordered[:max(1, limit)]]
+
+
 def _listen_pool(conn, exclude: set[str] | None = None, limit: int | None = None):
     """听学池排序（未听过优先；已听按听过次数少优先、同次数则越久未听越优先），可排除 id 集合。
 
@@ -411,16 +442,7 @@ def _listen_pool(conn, exclude: set[str] | None = None, limit: int | None = None
     避免每次听学请求把整库 tts_text 拉进内存。
     """
     exclude = exclude or set()
-    rows = conn.execute(
-        """
-        SELECT e.id, e.subject, e.priority, e.kind,
-               (SELECT COUNT(*) FROM reviews r
-                WHERE r.entry_id=e.id AND r.mode='listen') AS listen_count,
-               (SELECT MAX(r.ts) FROM reviews r
-                WHERE r.entry_id=e.id AND r.mode='listen') AS last_ts
-        FROM entries e
-        WHERE e.status='final' AND e.tts_text != ''
-        """).fetchall()
+    rows = _listen_light_rows(conn)
     remaining = conn.execute(
         """
         SELECT COUNT(*) AS n FROM entries e

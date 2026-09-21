@@ -36,6 +36,13 @@ SILENCE_WINDOW_MS = 50
 MAX_EDGE_SILENCE_SEC = 2.0
 SILENT_OVERALL_RMS = 60.0
 
+#: 默认「需重合成」的坏录音类型（条目口径：缺失音频本身就是故障）
+DEFAULT_REPAIR_KINDS = ("missing", "empty", "stale", "suspect")
+#: 法条题卡口径：missing 是「还没生成」的正常状态，不驱动批量重合成
+CARD_REPAIR_KINDS = ("empty", "stale", "suspect", "over_length")
+#: 听学单条卡片音频上限（用户口径：30 秒内）
+MAX_CARD_DURATION_SEC = 30.0
+
 
 @dataclass
 class Issue:
@@ -102,8 +109,9 @@ def _rms(frames: bytes) -> float:
 
 
 def audit_entry(conn, entry_id: str, text: str, *, wave_metrics: bool = True,
-                manifest: dict | None = None) -> list[Issue]:
-    """单条目质检，返回 0~n 条 Issue。"""
+                manifest: dict | None = None,
+                max_duration_sec: float = 0.0) -> list[Issue]:
+    """单条目质检，返回 0~n 条 Issue。max_duration_sec>0 时超时记 over_length。"""
     path = config.AUDIO_DIR / f"{entry_id}.wav"
     normalized = normalize(text)
     issues: list[Issue] = []
@@ -127,6 +135,11 @@ def audit_entry(conn, entry_id: str, text: str, *, wave_metrics: bool = True,
     rate = tts.chars_per_sec(text, metrics["duration_sec"])
     fields = {k: metrics[k] for k in ("duration_sec", "rms", "lead_silence_sec",
                                       "tail_silence_sec")}
+    if max_duration_sec and metrics["duration_sec"] > max_duration_sec:
+        issues.append(Issue(
+            entry_id=entry_id, kind="over_length",
+            detail=f"超时长 {metrics['duration_sec']}s > {max_duration_sec}s",
+            chars_per_sec=rate, **base, **fields))
     if metrics["duration_sec"] > 0 and not MIN_RATE <= rate <= MAX_RATE:
         issues.append(Issue(entry_id=entry_id, kind="suspect",
                             detail=f"语速异常 {rate} 字/秒", chars_per_sec=rate,
@@ -153,24 +166,30 @@ def load_manifest(conn) -> dict:
 
 
 def audit_entries(conn, rows, *, wave_metrics: bool = True,
-                  limit: int = 0) -> list[Issue]:
+                  limit: int = 0, max_duration_sec: float = 0.0) -> list[Issue]:
     """批量质检。rows 为 [{id, tts_text}, ...]。"""
     manifest = load_manifest(conn)
     issues: list[Issue] = []
     for i, r in enumerate(rows, 1):
         issues += audit_entry(conn, r["id"], r["tts_text"] or "",
-                              wave_metrics=wave_metrics, manifest=manifest)
+                              wave_metrics=wave_metrics, manifest=manifest,
+                              max_duration_sec=max_duration_sec)
         if limit and i >= limit:
             break
     return issues
 
 
-def summarize(issues: list[Issue]) -> dict:
-    """按类型汇总，并给出可直接驱动 repair 的 id 清单。"""
+def summarize(issues: list[Issue],
+              repair_kinds: tuple[str, ...] = DEFAULT_REPAIR_KINDS) -> dict:
+    """按类型汇总，并给出可直接驱动 repair 的 id 清单。
+
+    repair_kinds 决定哪些类型算「需重合成」：条目含 missing，法条题卡不含
+    （卡片音频按需生成，缺失属待生成）。
+    """
     by_kind: dict[str, list[str]] = {}
     for issue in issues:
         by_kind.setdefault(issue.kind, []).append(issue.entry_id)
-    repair = sorted({i for k in ("missing", "empty", "stale", "suspect")
+    repair = sorted({i for k in repair_kinds
                      for i in by_kind.get(k, [])})
     return {
         "counts": {k: len(v) for k, v in sorted(by_kind.items())},

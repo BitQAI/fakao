@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from app import config
+from app import config, db
 from app import tts
 
 
@@ -53,6 +53,27 @@ def test_dry_run_creates_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     out = tts.ensure_mp3("XF-001", "文本", dry_run=True)
     assert out.name == "XF-001.wav" and not out.exists()
+
+
+def test_ensure_mp3_records_asset_only_when_new_audio(monkeypatch, tmp_path):
+    """按需合成（含法条题卡）首次生成即建台账；命中缓存不写库。"""
+    monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(config, "DASHSCOPE_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "TTS_SPEED", 1.0)
+    _patch_client(monkeypatch)
+    conn = db.connect(tmp_path / "t.db")
+
+    out = tts.ensure_mp3("XF-Q000162", "卡片文本。", conn=conn)
+    row = conn.execute("SELECT text_hash FROM tts_assets WHERE entry_id=?",
+                       ("XF-Q000162",)).fetchone()
+    assert out.exists() and row is not None
+    assert row["text_hash"] == tts.text_hash("卡片文本。")
+
+    conn.execute("DELETE FROM tts_assets")
+    conn.commit()
+    tts.ensure_mp3("XF-Q000162", "卡片文本。", conn=conn)      # 命中缓存
+    assert conn.execute("SELECT COUNT(*) c FROM tts_assets").fetchone()["c"] == 0
+    conn.close()
 
 
 def test_existing_file_skips_synth(monkeypatch, tmp_path):

@@ -85,8 +85,13 @@ def _synthesize(text: str) -> bytes | None:
         return None
 
 
-def ensure_mp3(entry_id: str, text: str, dry_run: bool = False) -> Path:
-    """对外接口名保持 ensure_mp3（路由/前端不感知），实际输出 .wav。"""
+def ensure_mp3(entry_id: str, text: str, dry_run: bool = False,
+               conn=None) -> Path:
+    """对外接口名保持 ensure_mp3（路由/前端不感知），实际输出 .wav。
+
+    传入 conn 时，本次真生成了新音频才写 tts_assets 台账（命中缓存不写库，
+    保持快路径零写）。条目与法条题卡共用该路径。
+    """
     out = config.AUDIO_DIR / f"{entry_id}.wav"
     if out.exists() and out.stat().st_size > 0:
         return out
@@ -99,6 +104,8 @@ def ensure_mp3(entry_id: str, text: str, dry_run: bool = False) -> Path:
     # 空文件不缓存：删除以便下次重试（否则 0 字节文件会永久短路）
     if not out.exists() or out.stat().st_size == 0:
         out.unlink(missing_ok=True)
+    elif conn is not None:
+        record_asset(conn, entry_id, text, out)
     return out
 
 
