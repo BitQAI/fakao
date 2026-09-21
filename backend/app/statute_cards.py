@@ -12,6 +12,13 @@ from app import config, quiz_bank, statute_index, statutes
 #: 卡片正文摘要长度上限（听学朗读与卡片背面共用，超长条文截断）
 ARTICLE_SNIPPET = 160
 
+#: 听学朗读文本上限（归一后字数）。30 秒口径：实测中位语速 4.79 字/秒，
+#: 慢样本约 4 字/秒 → 110 字 ≈ 23~27 秒，留出安全余量。
+LISTEN_MAX_CHARS = 110
+#: 题干 / 解析的预算占比（解析缺省时额度全部让给题干）
+_STEM_SHARE = 0.62
+_CLIP_SEPS = ("。", "；", "，", "、")
+
 #: read=看背，listen=听学，quiz=自测（作答后标记，用于轮转优先未练过的题）
 MODES = ("read", "listen", "quiz")
 
@@ -161,17 +168,53 @@ def by_article(conn, law_key: str, no: int, sub: int = 0,
     return out
 
 
-def listen_text(card: dict) -> str:
-    """听学法条卡的朗读文本：依据 → 条文 → 题干 → 答案 → 解析。"""
-    lines = [f"法条依据：{card['basis']}。"]
-    if card["article_text"]:
-        lines.append(f"条文原文：{snippet(card['article_text'])}。")
-    lines.append(f"题目：{card['stem']}")
-    if card["options"]:
-        lines.append("选项：" + "；".join(card["options"]) + "。")
-    lines.append(f"答案：{card['answer']}。")
-    if card["analysis"]:
-        lines.append(f"解析：{card['analysis']}")
+def _clip(text: str, limit: int) -> str:
+    """按字数裁剪，优先在句读处断句；裁不动时补句号收尾（不留半句）。"""
+    flat = " ".join((text or "").split())
+    if limit <= 0:
+        return ""
+    if len(flat) <= limit:
+        return flat
+    cut = flat[:limit]
+    for sep in _CLIP_SEPS:
+        idx = cut.rfind(sep)
+        if idx >= int(limit * 0.5):
+            head = cut[:idx + 1]
+            return head if sep in "。；" else head[:-1] + "。"
+    return cut.rstrip("。；，、") + "。"
+
+
+def listen_text(card: dict, max_chars: int = LISTEN_MAX_CHARS) -> str:
+    """听学法条卡的朗读文本（30 秒版）：依据 → 题干 → 答案 → 解析要点。
+
+    丢弃「选项」与「条文原文」：选项在听感上冗余（答案已给出），条文原文长度不可控且
+    与解析重复，用户可在卡片背面看。预算不足时按 62%/38% 在题干与解析之间分配，
+    某部分用不满则额度让给对方；输出（归一后）不超过 `max_chars` 字。
+    """
+    basis = f"法条依据：{card['basis']}。"
+    answer = f"答案：{card['answer']}。"
+    labels = len("题目：") + len("解析：")
+    budget = max_chars - len(basis) - len(answer) - labels
+    stem_src, analysis_src = card["stem"] or "", card["analysis"] or ""
+    if not analysis_src:
+        stem, analysis = _clip(stem_src, budget), ""
+    elif not stem_src:
+        stem, analysis = "", _clip(analysis_src, budget)
+    else:
+        stem_limit = int(budget * _STEM_SHARE)
+        stem = _clip(stem_src, stem_limit)
+        analysis = _clip(analysis_src, budget - len(stem))
+        # 某一项没吃满额度时，把剩余额度让给另一项
+        spare = budget - len(stem) - len(analysis)
+        if spare > 0:
+            if len(stem) < len(stem_src):
+                stem = _clip(stem_src, len(stem) + spare)
+            elif len(analysis) < len(analysis_src):
+                analysis = _clip(analysis_src, len(analysis) + spare)
+    lines = [basis, f"题目：{stem}"]
+    lines.append(answer)
+    if analysis:
+        lines.append(f"解析：{analysis}")
     return "\n".join(lines)
 
 

@@ -1,5 +1,6 @@
 """法条卡池：四入口共用、未看过优先、按条查询、听学文本。"""
 from app import config, db, importer, quiz_bank, statute_cards, statute_index, statutes
+from app.tts_text import normalize
 
 LAW = """# 中华人民共和国刑法
 
@@ -99,7 +100,25 @@ def test_by_article_and_listen_text(tmp_db, tmp_path, monkeypatch):
 
     text = statute_cards.listen_text(hit[0])
     assert "法条依据：中华人民共和国刑法第一条" in text
-    assert "条文原文：" in text and "答案：A" in text and "解析：解析0" in text
+    assert "答案：A" in text and "解析：解析0" in text
+    # 30 秒口径：不再朗读条文原文与选项，整体字数受控
+    assert "条文原文：" not in text and "选项：" not in text
+    assert len(normalize(text)) <= statute_cards.LISTEN_MAX_CHARS
+    conn.close()
+
+
+def test_listen_text_clips_long_stem_and_analysis(tmp_db, tmp_path, monkeypatch):
+    """长题干/长解析按预算裁剪，依据与答案必须保留。"""
+    _prepare(tmp_path, monkeypatch)
+    conn = db.connect(tmp_db[0])
+    _seed(conn)
+    card = statute_cards.pool(conn, limit=1)[0]
+    card = dict(card, stem="长题干。" * 40, analysis="长解析。" * 40)
+    text = statute_cards.listen_text(card)
+    assert text.count("。") >= 3
+    assert len(normalize(text)) <= statute_cards.LISTEN_MAX_CHARS
+    assert "法条依据：" in text and "答案：" in text and "长题干" in text
+    assert statute_cards.listen_text(card) == text      # 确定性
     conn.close()
 
 
