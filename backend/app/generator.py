@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from app import config, db, importer, tts  # noqa: E402
 import generate_entries as gen  # noqa: E402
 
-SUBJECT_ORDER = ["民诉", "商经知", "理论法", "三国法", "刑法", "民法", "行政法"]
+SUBJECT_ORDER = ["民诉", "商经知劳环", "理论法", "三国法", "刑法", "民法", "行政法"]
 SUBJECT_TARGET = 150
 SUBJECT_PREFIX = gen.SUBJECT_PREFIX
 
@@ -19,7 +19,7 @@ _running = False
 def next_pending_subject(conn) -> str | None:
     """按科目优先级返回 final 条数未达标的第一个科目。"""
     counts = {r["subject"]: r["n"] for r in conn.execute(
-        "SELECT subject, COUNT(*) AS n FROM entries WHERE status='final' "
+        "SELECT subject, COUNT(*) AS n FROM v_entries WHERE status='final' "
         "GROUP BY subject")}
     for s in SUBJECT_ORDER:
         if counts.get(s, 0) < SUBJECT_TARGET:
@@ -35,14 +35,16 @@ def _import_and_synth(subject: str) -> None:
         if result["errors"]:
             print(f"[generator] {subject} 导入失败: {result['errors'][:3]}")
             return
-        conn.execute("UPDATE entries SET status='final' WHERE subject=?", (subject,))
+        # 只提升正式条目：卡片（kind='card'）的 final/draft 由 sync_card_entries.py 管
+        conn.execute("UPDATE entries SET status='final' WHERE subject=? AND kind='entry'",
+                     (subject,))
         conn.commit()
     finally:
         conn.close()
     conn = db.connect()
     try:
         rows = conn.execute(
-            "SELECT id, tts_text FROM entries WHERE subject=? AND status='final' "
+            "SELECT id, tts_text FROM v_entries WHERE subject=? AND status='final' "
             "AND tts_text != ''", (subject,)).fetchall()
     finally:
         conn.close()

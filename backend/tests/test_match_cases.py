@@ -100,7 +100,7 @@ def test_subject_allows_domain():
     assert subject_allows_domain("刑法", "分则-财产犯罪", "刑事")
     assert not subject_allows_domain("刑法", "分则-财产犯罪", "民事")
     assert subject_allows_domain("民法", "婚姻家庭", "民事")
-    assert subject_allows_domain("商经知", "专利法", "知识产权")
+    assert subject_allows_domain("商经知劳环", "专利法", "知识产权")
     assert subject_allows_domain("三国法", "国际私法-冲突规范", "民事")
     assert not subject_allows_domain("三国法", "国家承认与继承", "民事")
     assert not subject_allows_domain("理论法", "中国法制史", "民事")

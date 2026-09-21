@@ -275,12 +275,12 @@ def test_update_entry_text_ok_and_validation(client):
     # tts/音频字段不受影响，条目仍为 final 可查
     assert data["tts_text"].startswith("【刑法·转化型抢劫】")
     assert client.get("/api/entries/XF-001").json()["note"] == "注意当场性。"
-    # 锚点过短 → 400
-    bad = dict(good, anchor="太短了")
-    assert client.put("/api/entries/XF-001", json=bad).status_code == 400
-    # 结论不以句号结尾 → 400
-    bad2 = dict(good, conclusion="成立抢劫罪")
-    assert client.put("/api/entries/XF-001", json=bad2).status_code == 400
+    # 字数只作建议区间：锚点过短、结论无句号均可保存
+    short = dict(good, anchor="太短了", conclusion="成立抢劫罪")
+    assert client.put("/api/entries/XF-001", json=short).status_code == 200
+    # 空字段仍拒绝
+    empty = dict(good, conclusion="   ")
+    assert client.put("/api/entries/XF-001", json=empty).status_code == 400
     # 非法优先级 → 400
     bad3 = dict(good, priority="必考")
     assert client.put("/api/entries/XF-001", json=bad3).status_code == 400

@@ -252,6 +252,7 @@ export default function GroupQuizView() {
           <div className={`result ${result.correct ? "ok" : "bad"}`}>
             <b>{result.correct ? "答对了" : "答错了"}</b>
             {q.qtype === "cloze" && <p className="muted">正确答案：{result.answer}</p>}
+            {q.basis && <p className="muted">法条依据：{q.basis}</p>}
             <div className="analysis"
               dangerouslySetInnerHTML={{ __html: mdToHtml(result.analysis || `正确答案：${result.answer}`) }} />
             <div className="row">

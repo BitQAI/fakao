@@ -109,7 +109,7 @@ def leaderboard(conn, limit: int = 200, sort: str = "total") -> list[dict]:
                  AS listen_count,
                COUNT(r.id) AS total_count,
                MAX(r.ts) AS last_ts
-        FROM entries e LEFT JOIN reviews r ON r.entry_id = e.id
+        FROM v_entries e LEFT JOIN reviews r ON r.entry_id = e.id
         WHERE e.status = 'final'
         GROUP BY e.id
         """

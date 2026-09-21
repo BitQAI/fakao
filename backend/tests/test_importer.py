@@ -72,10 +72,19 @@ def test_import_rejects_whole_batch_on_error(tmp_db):
     assert conn.execute("SELECT COUNT(*) AS n FROM entries").fetchone()["n"] == 0
 
 
-def test_validate_anchor_length():
+def test_validate_anchor_empty():
     e = good_entry()
-    e["anchor"] = "太短"
+    e["anchor"] = "   "
     assert any("锚点句" in msg for msg in importer.validate_entry(e, 0))
+
+
+def test_validate_no_length_limit():
+    """字数只作建议区间，超长不再拦截；结论也不强制句号结尾。"""
+    e = good_entry()
+    e["anchor"] = "甲" * 80
+    e["conclusion"] = "乙" * 120
+    e["tts_text"] = "【刑法·超长】" + "丙" * 300
+    assert importer.validate_entry(e, 0) == []
 
 
 def test_validate_bad_id():
@@ -164,4 +173,3 @@ def test_cases_bad_shape_error(tmp_db):
     e["cases"] = [{"source": "不存在的库", "loc": "x"}, {"source": "人民法院案例库", "loc": "y", "extra": 1}]
     errors = importer.validate_entry(e, 0)
     assert any("案例" in msg for msg in errors)
-

@@ -35,7 +35,7 @@ def _entries_from_db(db_path: Path) -> list[dict]:
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute("SELECT cases FROM entries").fetchall()
+    rows = conn.execute("SELECT cases FROM v_entries").fetchall()
     conn.close()
     return [{"cases": json.loads(r["cases"] or "[]")} for r in rows]
 

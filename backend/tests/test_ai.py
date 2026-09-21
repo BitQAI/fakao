@@ -11,7 +11,7 @@ def fake_entry():
 
 
 def test_call_llm_returns_none_without_key(monkeypatch):
-    monkeypatch.setattr(ai, "get_client", lambda: None)
+    monkeypatch.setattr(ai, "provider_chain", list)   # 没有可用供应商
     assert ai.call_llm("sys", "user") is None
 
 
@@ -43,6 +43,21 @@ def test_generate_quiz_ok(monkeypatch):
     monkeypatch.setattr(ai, "call_llm", lambda *a, **k: payload)
     q = ai.generate_quiz(fake_entry())
     assert q["qtype"] == "choice" and q["answer"] == "A"
+
+
+def test_generate_quiz_prompt_carries_entry(monkeypatch):
+    """回归：出题 prompt 必须带上条目内容，否则题目与考点无关。"""
+    captured = {}
+
+    def fake_call(system, user, **kwargs):
+        captured["user"] = user
+        return '{"stem": "问：结论是？", "options": ["A. 抢劫罪", "B. 盗窃罪"], "answer": "A"}'
+
+    monkeypatch.setattr(ai, "call_llm", fake_call)
+    entry = fake_entry()
+    ai.generate_quiz(entry)
+    for key in ("subject", "point", "anchor", "conclusion", "note"):
+        assert entry[key] in captured["user"]
 
 
 def test_cloze_quiz_shape():

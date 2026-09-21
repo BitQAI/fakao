@@ -5,6 +5,7 @@ import FlashcardView from "@/components/FlashcardView";
 import ListenView from "@/components/ListenView";
 import QuizView from "@/components/QuizView";
 import WrongbookView from "@/components/WrongbookView";
+import CasePanel from "@/components/CasePanel";
 
 function StudyContent() {
   const params = useSearchParams();
@@ -14,6 +15,7 @@ function StudyContent() {
     { key: "listen", label: "听学" },
     { key: "quiz", label: "自测" },
     { key: "wrong", label: "错题" },
+    { key: "case", label: "案例" },
   ];
   return (
     <div className="page-box">
@@ -32,6 +34,7 @@ function StudyContent() {
       {view === "listen" && <ListenView />}
       {view === "quiz" && <QuizView />}
       {view === "wrong" && <WrongbookView />}
+      {view === "case" && <CasePanel />}
     </div>
   );
 }

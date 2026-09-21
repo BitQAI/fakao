@@ -38,10 +38,13 @@ def main():
                 if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(f"pageerror:{e}"))
 
-        # 1. 今日页
+        # 1. 今日（独立「今日页」已并入 /study + /report，入口仍看 / 的跳转）
         print("== 今日页 ==")
         page.goto(BASE + "/", wait_until="networkidle")
-        check(page.locator("h1", has_text="今日").count() > 0, "今日标题")
+        check("/study" in page.url, "首页跳转学习页")
+        check(page.locator("button.segment", has_text="看背").count() > 0, "学习页页签")
+        page.goto(BASE + "/report", wait_until="networkidle")
+        check(page.locator("h1", has_text="今日进度").count() > 0, "今日进度标题")
         check(page.locator(".progress-ring").count() > 0, "进度环")
         check(page.locator(".counts .count").count() == 4, "计划四计数")
         shot(page, "01-today")
