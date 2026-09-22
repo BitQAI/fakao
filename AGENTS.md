@@ -86,6 +86,11 @@
 .venv/bin/python scripts/match_cases.py --append-guiding   # 对已有 cases 条目追加指导性案例（领域门槛+上限 3）
 ```
 
+案例库检索与阅读（前端 `/cases`，只读，不改表）：`GET /api/case/search?q=&source=&limit=`
+（多词 AND，命中标题/案号/关键词/类别/正文）、`GET /api/case/detail?source=&loc=`
+（原文按裁判要旨/基本案情/裁判理由等分节）、`GET /api/case/stats`。
+注意：路径必须是单数 `/api/case/*`，复数 `/api/cases/{qid}` 是主观题接口。
+
 ### 3.5b 题库生成（客观题 / 数字判断题，2026-09-20 新增）
 
 题库题与「当日缓存题」同表 `quizzes`，用 `origin` 区分：`daily` 当日懒生成、

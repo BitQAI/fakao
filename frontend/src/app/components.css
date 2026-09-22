@@ -674,6 +674,47 @@
   margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--glass-border);
 }
 
+/* 案例库检索与文书化阅读 */
+.caselib-filters {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px;
+}
+.caselib-filter {
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 999px; padding: 6px 12px; font-size: 12px;
+  color: var(--muted); cursor: pointer;
+}
+.caselib-filter.active {
+  color: #fff; border-color: transparent;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+}
+.caselib-hit-title { font-size: 14px; font-weight: 600; line-height: 1.5; }
+.caselib-doc {
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 16px; padding: 16px 14px; margin-top: 10px;
+}
+.caselib-title {
+  margin: 0 0 6px; font-size: 17px; line-height: 1.55; text-align: center;
+}
+.caselib-meta {
+  margin: 0 0 8px; font-size: 12px; color: var(--muted); text-align: center;
+}
+.caselib-tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.caselib-tag {
+  border: 1px solid var(--glass-border); background: transparent;
+  border-radius: 999px; padding: 3px 10px; font-size: 12px;
+  color: var(--primary); cursor: pointer;
+}
+.caselib-section { margin-top: 16px; }
+.caselib-section-head {
+  margin: 0 0 8px; padding-left: 9px; font-size: 14px; line-height: 1.4;
+  border-left: 3px solid var(--primary);
+}
+.caselib-para {
+  margin: 0 0 10px; font-size: 14px; line-height: 1.85;
+  text-indent: 2em; text-align: justify;
+}
+.caselib-link { color: var(--primary); font-size: 12px; }
+
 /* 每日案例（微主观题） */
 .case-view { display: flex; flex-direction: column; gap: 10px; }
 .case-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
