@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 
+from app import case_facets
 from app.cases import CASE_SOURCES
 
 #: 独占一行的裸小标题（最高法指导性案例等）
@@ -138,7 +139,8 @@ def _dedupe_sentences(para: str) -> tuple[str, int]:
 
 def _repeated_run(sents: list[str], start: int) -> int:
     """sents[start:] 开头是否立刻重复了某个句块，返回该块长度。"""
-    limit = (len(sents) - start) // 2
+    # 句块长度上限 6：更长的重复块极罕见，限住后避免长文里 O(n²) 扫描
+    limit = min(6, (len(sents) - start) // 2)
     for size in range(limit, 0, -1):
         first = sents[start:start + size]
         if first == sents[start + size:start + size * 2] \
@@ -255,14 +257,20 @@ def _terms(q: str) -> list[str]:
     return [t for t in re.split(r"[\s、，,]+", (q or "").strip()) if t]
 
 
+def _field_text(row: dict, field: str) -> str:
+    """参与关键词比对的字段文本；keywords 由数组拼成一行。"""
+    value = row.get(field)
+    return " ".join(value) if isinstance(value, list) else (value or "")
+
+
 def _hits(row: dict, terms: list[str]) -> bool:
-    return all(any(t in (row.get(f) or "") for f, _w in _FIELDS) for t in terms)
+    return all(any(t in _field_text(row, f) for f, _w in _FIELDS) for t in terms)
 
 
 def _score(row: dict, terms: list[str]) -> int:
-    score = sum(max((w for f, w in _FIELDS if t in (row.get(f) or "")), default=0)
+    score = sum(max((w for f, w in _FIELDS if t in _field_text(row, f)), default=0)
                 for t in terms)
-    if all(t in row["title"] for t in terms):
+    if all(t in _field_text(row, "title") for t in terms):
         score += 4
     return score
 
@@ -271,16 +279,36 @@ def _snippet(row: dict, terms: list[str]) -> str:
     text = row.get("text") or ""
     idx = next((i for t in terms for i in [text.find(t)] if i >= 0), -1)
     if idx < 0:
-        head = text[:_SNIPPET_PAD * 2]
-        return head + ("…" if len(text) > len(head) else "")
+        return _head_snippet(text)
     start = max(0, idx - _SNIPPET_PAD)
     end = min(len(text), idx + _SNIPPET_PAD)
     return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
 
 
-def _sort_key(item: dict) -> tuple:
-    return (-item["score"], not item["case_no"], _rev(item["date"]),
-            item["source"], item["loc"])
+def _head_snippet(text: str) -> str:
+    """未命中正文时的摘要：取文书首个正文小节（跳过关键词之类的元信息）。"""
+    parsed, _dropped = sections(text)
+    body = next((s["text"] for s in parsed if s["label"] not in ("关键词", "")
+                 and not s["text"].startswith("（")), "")
+    source = re.sub(r"\s+", " ", body or text).strip()
+    return source[:_SNIPPET_PAD * 2] + ("…" if len(source) > _SNIPPET_PAD * 2 else "")
+
+
+def _date_key(date: str) -> str:
+    """日期归一（点号/斜杠 → 横线），便于跨格式比较。"""
+    return re.sub(r"[./]", "-", (date or "").strip())
+
+
+def _sort_key(sort: str, terms: list[str]):
+    """排序键：相关度（有 q）/ 最新 / 最早；无日期的排最后。"""
+    if sort == "relevance" and terms:
+        return lambda item: (-item["score"], not _date_key(item["date"]),
+                             _rev(_date_key(item["date"])), item["source"], item["loc"])
+    if sort == "oldest":
+        return lambda item: (not _date_key(item["date"]), _date_key(item["date"]),
+                             item["source"], item["loc"])
+    return lambda item: (not _date_key(item["date"]), _rev(_date_key(item["date"])),
+                         item["source"], item["loc"])
 
 
 def _rev(text: str) -> str:
@@ -288,29 +316,86 @@ def _rev(text: str) -> str:
     return "".join(chr(0x10FFFF - ord(c)) for c in text) if text else "\uffff"
 
 
-def search(conn, q: str, source: str | None = None, limit: int = 30) -> list[dict]:
-    """关键词模糊检索：多词 AND（全部命中），按字段权重排序，返回带片段的命中列表。"""
-    terms = _terms(q)
-    if not terms:
-        return []
-    sql = ("SELECT source, loc, title, category, case_no, keywords, date, url, text "
-           "FROM cases")
+SORTS = ("relevance", "newest", "oldest")
+_COLS = "source, loc, title, category, case_no, keywords, date, url"
+
+
+def _fetch(conn, source: str | None, with_text: bool) -> list[dict]:
+    """取候选行；q 为空（纯浏览）时不拉正文，只在分页后补当页正文。"""
+    sql = f"SELECT {_COLS}{', text' if with_text else ''} FROM cases"
     params: list[str] = []
     if source:
         sql += " WHERE source = ?"
         params.append(source)
-    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
-    items = []
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def _attach_text(conn, rows: list[dict]) -> None:
+    """为当页结果补正文（浏览模式下避免整表拉正文）。"""
+    if not rows:
+        return
+    keys = [(r["source"], r["loc"]) for r in rows]
+    marks = ",".join(["(?,?)"] * len(keys))
+    params = [v for key in keys for v in key]
+    found = {(r["source"], r["loc"]): r["text"] for r in conn.execute(
+        f"SELECT source, loc, text FROM cases WHERE (source, loc) IN ({marks})",
+        params).fetchall()}
     for row in rows:
-        if not _hits(row, terms):
-            continue
-        item = {**row, "keywords": _keywords(row["keywords"])}
-        item["score"] = _score(row, terms)
+        row["text"] = found.get((row["source"], row["loc"]), "")
+
+
+def _matches(row: dict, terms: list[str], field: str | None,
+             crime: str | None, year: str | None) -> bool:
+    if terms and not _hits(row, terms):
+        return False
+    if field and case_facets.field_of(row["keywords"]) != field:
+        return False
+    if crime and crime not in row["keywords"]:
+        return False
+    if year and case_facets.case_year(row["date"]) != year:
+        return False
+    return True
+
+
+def _item(row: dict, terms: list[str], with_text: bool) -> dict:
+    item = {k: v for k, v in row.items() if k != "text"}
+    item["score"] = row.get("score", 0)
+    if with_text:
         item["snippet"] = _snippet(row, terms)
-        item.pop("text")
-        items.append(item)
-    items.sort(key=_sort_key)
-    return items[:limit]
+    return item
+
+
+def search(conn, q: str = "", source: str | None = None, field: str | None = None,
+           crime: str | None = None, year: str | None = None,
+           sort: str = "relevance", limit: int = 30, offset: int = 0) -> dict:
+    """案例检索/浏览：关键词（可空）+ 部门法/罪名/年份筛选 + 排序与分页。
+
+    返回 {items, total, offset, limit, sort, query, filters}；total 为筛选后的全量命中数。
+    """
+    terms = _terms(q)
+    if sort == "relevance" and not terms:
+        sort = "newest"
+    rows = _fetch(conn, source, with_text=bool(terms))
+    for row in rows:
+        row["keywords"] = _keywords(row["keywords"])
+    matched = [r for r in rows if _matches(r, terms, field, crime, year)]
+    if terms:
+        for row in matched:
+            row["score"] = _score(row, terms)
+    matched.sort(key=_sort_key(sort, terms))
+    page = matched[offset:offset + limit]
+    if not terms:
+        _attach_text(conn, page)
+    return {
+        "items": [_item(r, terms, True) for r in page],
+        "total": len(matched),
+        "offset": offset,
+        "limit": limit,
+        "sort": sort,
+        "query": (q or "").strip(),
+        "filters": {"source": source or "", "field": field or "",
+                    "crime": crime or "", "year": year or ""},
+    }
 
 
 def stats(conn) -> dict:

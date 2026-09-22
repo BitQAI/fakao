@@ -675,9 +675,40 @@
 }
 
 /* 案例库检索与文书化阅读 */
-.caselib-filters {
-  display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px;
+.casebar-wrap { display: flex; flex-direction: column; gap: 8px; }
+.casebar { display: flex; gap: 6px; align-items: center; }
+.casebar-select {
+  flex: 1 1 0; min-width: 0; height: 34px;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 10px; padding: 0 6px; font-size: 12px; color: var(--ink);
+  -webkit-appearance: none; appearance: none;
 }
+.casebar-adv {
+  flex: none; height: 34px; padding: 0 10px; white-space: nowrap;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 10px; font-size: 12px; color: var(--primary); cursor: pointer;
+}
+.casebar-adv.active {
+  color: #fff; border-color: transparent;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+}
+.casebar-panel {
+  display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 14px; padding: 10px 10px 6px;
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+}
+.casebar-panel-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  border-top: 1px dashed var(--glass-border); padding-top: 4px;
+}
+.caselib-facet-row { display: flex; gap: 8px; align-items: flex-start; }
+.caselib-facet-label {
+  flex: none; width: 44px; padding-top: 6px;
+  font-size: 12px; color: var(--muted); text-align: right;
+}
+.caselib-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.caselib-summary { color: var(--primary); }
 .caselib-filter {
   border: 1px solid var(--glass-border); background: var(--glass-soft);
   border-radius: 999px; padding: 6px 12px; font-size: 12px;
@@ -687,6 +718,20 @@
   color: #fff; border-color: transparent;
   background: linear-gradient(135deg, var(--primary), var(--primary-2));
 }
+.caselib-more-link {
+  border: 0; background: transparent; padding: 6px 4px;
+  font-size: 12px; color: var(--primary); cursor: pointer;
+}
+.caselib-year {
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 999px; padding: 6px 10px; font-size: 12px; color: var(--ink);
+}
+.caselib-sorts { margin: 0; }
+.caselib-reset {
+  border: 0; background: transparent; padding: 6px 4px;
+  font-size: 12px; color: var(--bad); cursor: pointer;
+}
+.caselib-more { margin-top: 10px; width: 100%; }
 .caselib-hit-title { font-size: 14px; font-weight: 600; line-height: 1.5; }
 .caselib-doc {
   border: 1px solid var(--glass-border); background: var(--glass-soft);

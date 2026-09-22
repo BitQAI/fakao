@@ -3,19 +3,30 @@ import type { CaseHit } from "@/lib/caseLibTypes";
 
 /** 案例命中列表：来源·类别·案号·日期 + 正文片段（命中词高亮）。 */
 export default function CaseLibraryList({
-  hits, query, loading, onPick,
+  hits, query, loading, total, summary, onPick, onLoadMore,
 }: {
   hits: CaseHit[];
   query: string;
   loading: boolean;
+  total: number;
+  summary?: string;
   onPick: (hit: CaseHit) => void;
+  onLoadMore: () => void;
 }) {
-  if (loading) return <p className="muted">检索中…</p>;
-  if (!query.trim()) return <p className="muted">输入关键词检索案例，如「房屋租赁」「正当防卫」。</p>;
-  if (hits.length === 0) return <p className="muted">没有命中「{query}」。</p>;
+  if (loading && hits.length === 0) return <p className="muted">检索中…</p>;
+  if (hits.length === 0) {
+    return <p className="muted">
+      {query.trim() ? `没有命中「${query}」，换个词或清空筛选试试。`
+                    : "没有符合当前筛选条件的案例。"}
+    </p>;
+  }
+  const remain = total - hits.length;
   return (
     <div>
-      <p className="muted">命中 {hits.length} 篇</p>
+      <p className="muted caselib-count">
+        共 {total} 篇（已显示 {hits.length}）
+        {summary && <span className="caselib-summary">｜{summary}</span>}
+      </p>
       <div className="statute-list">
         {hits.map((hit) => (
           <button key={`${hit.source}-${hit.loc}`}
@@ -30,6 +41,11 @@ export default function CaseLibraryList({
           </button>
         ))}
       </div>
+      {remain > 0 && (
+        <button className="btn caselib-more" onClick={onLoadMore} disabled={loading}>
+          {loading ? "加载中…" : `加载更多（还有 ${remain} 篇）`}
+        </button>
+      )}
     </div>
   );
 }
