@@ -1,18 +1,18 @@
 "use client";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getJson } from "@/lib/api";
 import CaseDocument from "@/components/CaseDocument";
+import CaseFilterBar from "@/components/CaseFilterBar";
 import CaseLibraryList from "@/components/CaseLibraryList";
 import KeywordSearch from "@/components/KeywordSearch";
-import type { CaseHit, CaseStats } from "@/lib/caseLibTypes";
+import type {
+  CaseFacets, CaseFilters, CaseHit, CaseSearchResult,
+} from "@/lib/caseLibTypes";
 
-/** 来源筛选标签用的短名（长名在结果行里仍完整展示）。 */
-const SHORT_SOURCE: Record<string, string> = {
-  "人民法院案例库": "人民法院",
-  "司法部案例库": "司法部",
-  "最高检指导性案例": "最高检",
-  "最高法指导性案例": "最高法",
+const PAGE = 30;
+const EMPTY_FILTERS: CaseFilters = {
+  source: "", field: "", crime: "", year: "", sort: "relevance",
 };
 
 function CasesContent() {
@@ -22,28 +22,58 @@ function CasesContent() {
   const loc = params.get("loc") ?? "";
 
   const [text, setText] = useState(query);
-  const [filter, setFilter] = useState("");
+  const [filters, setFilters] = useState<CaseFilters>(EMPTY_FILTERS);
+  const [facets, setFacets] = useState<CaseFacets | null>(null);
   const [hits, setHits] = useState<CaseHit[]>([]);
-  const [stats, setStats] = useState<CaseStats | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const seq = useRef(0);
 
   useEffect(() => {
-    getJson<CaseStats>("/api/case/stats").then(setStats).catch(() => setStats(null));
+    getJson<CaseFacets>("/api/case/facets").then(setFacets).catch(() => setFacets(null));
   }, []);
 
+  const url = useCallback((offset: number) => {
+    const sp = new URLSearchParams({
+      limit: String(PAGE), offset: String(offset), sort: filters.sort,
+    });
+    if (text.trim()) sp.set("q", text.trim());
+    if (filters.source) sp.set("source", filters.source);
+    if (filters.field) sp.set("field", filters.field);
+    if (filters.crime) sp.set("crime", filters.crime);
+    if (filters.year) sp.set("year", filters.year);
+    return `/api/case/search?${sp}`;
+  }, [text, filters]);
+
+  // 关键词或筛选变化 → 从第一页重新取
   useEffect(() => {
-    if (lib || !text.trim()) { setHits([]); return; }
-    setSearching(true);
+    if (lib) return;
+    const mine = ++seq.current;
+    setLoading(true);
     const timer = setTimeout(() => {
-      const sp = new URLSearchParams({ q: text.trim(), limit: "30" });
-      if (filter) sp.set("source", filter);
-      getJson<{ items: CaseHit[] }>(`/api/case/search?${sp}`)
-        .then((d) => setHits(d.items))
-        .catch(() => setHits([]))
-        .finally(() => setSearching(false));
-    }, 350);
+      getJson<CaseSearchResult>(url(0))
+        .then((d) => {
+          if (mine !== seq.current) return;
+          setHits(d.items);
+          setTotal(d.total);
+        })
+        .catch(() => { if (mine === seq.current) { setHits([]); setTotal(0); } })
+        .finally(() => { if (mine === seq.current) setLoading(false); });
+    }, 300);
     return () => clearTimeout(timer);
-  }, [lib, text, filter]);
+  }, [lib, url]);
+
+  const loadMore = useCallback(() => {
+    const mine = seq.current;
+    setLoading(true);
+    getJson<CaseSearchResult>(url(hits.length))
+      .then((d) => {
+        if (mine !== seq.current) return;
+        setHits((prev) => [...prev, ...d.items]);
+        setTotal(d.total);
+      })
+      .finally(() => { if (mine === seq.current) setLoading(false); });
+  }, [hits.length, url]);
 
   const go = useCallback((next: Record<string, string | undefined>) => {
     const sp = new URLSearchParams();
@@ -66,30 +96,39 @@ function CasesContent() {
     <div className="page-box">
       <h2 className="card-title">案例库</h2>
       <p className="muted">
-        4 个来源库共 {stats ? stats.total : "…"} 篇：按标题、案号、关键词、正文模糊检索，
-        点开后按正式文书分节阅读。
+        {facets ? `4 个来源库共 ${facets.total} 篇：` : "4 个来源库："}
+        可按部门法、罪名、年份筛选后直接翻，也可以输关键词检索。
       </p>
       <KeywordSearch value={text} onChange={setText}
         placeholder="搜案例，如「房屋租赁」「正当防卫 必要限度」" />
-      {stats && (
-        <div className="caselib-filters">
-          <button className={`caselib-filter${filter === "" ? " active" : ""}`}
-            onClick={() => setFilter("")}>全部 {stats.total}</button>
-          {stats.sources.map((s) => (
-            <button key={s.source}
-              className={`caselib-filter${filter === s.source ? " active" : ""}`}
-              onClick={() => setFilter(s.source)}>
-              {SHORT_SOURCE[s.source] ?? s.source} {s.n}
-            </button>
-          ))}
-        </div>
-      )}
-      <CaseLibraryList hits={hits} query={text} loading={searching}
+      <CaseFilterBar
+        facets={facets}
+        filters={filters}
+        hasQuery={text.trim().length > 0}
+        onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))}
+        onReset={() => setFilters(EMPTY_FILTERS)}
+      />
+      <CaseLibraryList
+        hits={hits}
+        query={text}
+        loading={loading}
+        total={total}
+        summary={summaryOf(filters)}
         onPick={(hit) => go({
           q: text.trim() || undefined, lib: hit.source, loc: hit.loc,
-        })} />
+        })}
+        onLoadMore={loadMore}
+      />
     </div>
   );
+}
+
+/** 结果计数行里带上当前筛选摘要（不额外占一行）。 */
+function summaryOf(filters: CaseFilters) {
+  return [filters.field, filters.crime, filters.year && `${filters.year} 年`,
+          filters.source, filters.sort === "newest" ? "最新在前"
+            : filters.sort === "oldest" ? "最早在前" : ""]
+    .filter(Boolean).join(" · ");
 }
 
 export default function CasesPage() {
