@@ -39,6 +39,17 @@ export function IconLaw({ size = 21 }: IconProps) {
   );
 }
 
+/** 案例：卷宗 + 文本行 */
+export function IconCase({ size = 21 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M7 3h8l4 4v14H7z" />
+      <path d="M15 3v4h4" />
+      <path d="M10 12h6M10 16h4" />
+    </svg>
+  );
+}
+
 export function IconMine({ size = 21 }: IconProps) {
   return (
     <svg {...base(size)}>

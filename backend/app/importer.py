@@ -12,6 +12,9 @@ SCHEMA_NAME = "fakao-entry/1.0"
 PRIORITIES = {"高频考点", "易错陷阱", "新增必考", "普通"}
 CASE_SOURCES = ("人民法院案例库", "司法部案例库", "最高检指导性案例", "最高法指导性案例")
 MAX_CASES = 3
+#: 建议区间（只告警不拦截，口径与 scripts/generate_entries.py 一致）
+SOFT_LIMITS = {"point": 15, "anchor": 42, "conclusion": 60, "tts_text": 150}
+ANCHOR_SOFT_MIN = 16
 ID_PATTERN = re.compile(r"^(MF|XF|XS|MS|SJ|LL|SG|XZ)-\d{3}$")
 REQUIRED_KEYS = ("id", "subject", "submodule", "point", "anchor", "conclusion",
                  "priority", "rationale", "sources", "statutes", "tts_text")
@@ -157,12 +160,28 @@ def validate_entry(e: dict, index: int) -> list[str]:
     return errs
 
 
-def import_payload(conn, payload: dict) -> dict:
-    entries = payload.get("entries", [])
-    errors = []
-    warnings = []
+def _soft_warnings(e: dict, index: int) -> list[str]:
+    """建议区间超出提示（W4）：不影响入库，只提示复核写作口径。"""
+    tag = f"#{index} {e.get('id', '')}"
+    out = []
+    for key, limit in SOFT_LIMITS.items():
+        value = e.get(key)
+        value = value.strip() if isinstance(value, str) else ""
+        if len(value) > limit:
+            out.append(f"{tag} {key} 超出建议区间: {len(value)} > {limit} 字")
+        elif key == "anchor" and 0 < len(value) < ANCHOR_SOFT_MIN:
+            out.append(f"{tag} 锚点句偏短: {len(value)} < {ANCHOR_SOFT_MIN} 字")
+    return out
+
+
+def check_payload(payload: dict) -> dict:
+    """干跑校验：不写库，返回 {count, errors, warnings}，口径与 import_payload 一致。"""
+    entries = payload.get("entries") or []
+    errors: list[str] = []
+    warnings: list[str] = []
     for i, e in enumerate(entries):
         errors.extend(validate_entry(e, i))
+        warnings.extend(_soft_warnings(e, i))
         for s in e.get("sources") or []:
             ref = s.get("ref", "")
             loc = s.get("loc", "")
@@ -173,12 +192,18 @@ def import_payload(conn, payload: dict) -> dict:
         for st in e.get("statutes") or []:
             if st and statutes.resolve_statute(st) is None:
                 warnings.append(f"#{i} {e.get('id', '')} 法条无法解析: {st}")
-    if errors:
-        return {"imported": 0, "errors": errors, "warnings": warnings}
+    return {"count": len(entries), "errors": errors, "warnings": warnings}
+
+
+def import_payload(conn, payload: dict) -> dict:
+    report = check_payload(payload)
+    if report["errors"]:
+        return {"imported": 0, "errors": report["errors"], "warnings": report["warnings"]}
+    entries = payload.get("entries") or []
     status = payload.get("status", "draft")
     conn.executemany(INSERT_SQL, [_row(e, status) for e in entries])
     conn.commit()
-    return {"imported": len(entries), "errors": [], "warnings": warnings}
+    return {"imported": len(entries), "errors": [], "warnings": report["warnings"]}
 
 
 def import_file(conn, path: Path) -> dict:

@@ -45,7 +45,11 @@
 
 ### 3.3 导入并提升 final
 
+导入前先干跑校验（不写库，`errors=0` 才继续）；字段口径、批次清单与真题批量导入规范见
+`docs/superpowers/specs/2026-09-22-条目数据格式化元数据规范.md`：
+
 ```bash
+.venv/bin/python scripts/validate_entries.py ../data/entries/刑法.json ...   # 干跑，报 E/W
 .venv/bin/python scripts/import_entries.py ../data/entries/刑法.json ...   # 校验 errors=0 才算成功
 .venv/bin/python -c "from app import db; c=db.connect(); print(c.execute(\"UPDATE entries SET status='final' WHERE status='draft'\").rowcount); c.commit(); c.close()"
 ```
@@ -81,6 +85,11 @@
 .venv/bin/python scripts/match_cases.py            # 普通补配（只处理 cases 为空条目）
 .venv/bin/python scripts/match_cases.py --append-guiding   # 对已有 cases 条目追加指导性案例（领域门槛+上限 3）
 ```
+
+案例库检索与阅读（前端 `/cases`，只读，不改表）：`GET /api/case/search?q=&source=&limit=`
+（多词 AND，命中标题/案号/关键词/类别/正文）、`GET /api/case/detail?source=&loc=`
+（原文按裁判要旨/基本案情/裁判理由等分节）、`GET /api/case/stats`。
+注意：路径必须是单数 `/api/case/*`，复数 `/api/cases/{qid}` 是主观题接口。
 
 ### 3.5b 题库生成（客观题 / 数字判断题，2026-09-20 新增）
 
