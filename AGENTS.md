@@ -45,7 +45,11 @@
 
 ### 3.3 导入并提升 final
 
+导入前先干跑校验（不写库，`errors=0` 才继续）；字段口径、批次清单与真题批量导入规范见
+`docs/superpowers/specs/2026-09-22-条目数据格式化元数据规范.md`：
+
 ```bash
+.venv/bin/python scripts/validate_entries.py ../data/entries/刑法.json ...   # 干跑，报 E/W
 .venv/bin/python scripts/import_entries.py ../data/entries/刑法.json ...   # 校验 errors=0 才算成功
 .venv/bin/python -c "from app import db; c=db.connect(); print(c.execute(\"UPDATE entries SET status='final' WHERE status='draft'\").rowcount); c.commit(); c.close()"
 ```

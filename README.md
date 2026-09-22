@@ -5,6 +5,7 @@
 设计：`docs/superpowers/specs/2026-08-27-法考冲刺工具-design.md`
 实施计划：`docs/superpowers/plans/2026-08-27-法考冲刺工具.md`
 AI 操作指南：`AGENTS.md`（供 AI 代理读取：条目生成/补缺/导入/音频/案例挂接/覆盖检查，以及后续拓展条目的方法论）
+条目数据规范：`docs/superpowers/specs/2026-09-22-条目数据格式化元数据规范.md`（新文件如何变成规范条目、真题批量导入、ID 段位与校验口径）
 
 ## 部署（Ubuntu 22）
 
