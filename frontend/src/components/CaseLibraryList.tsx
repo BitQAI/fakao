@@ -1,7 +1,7 @@
 "use client";
 import type { CaseHit } from "@/lib/caseLibTypes";
 
-/** 案例命中列表：来源·类别·案号·日期 + 正文片段（命中词高亮）。 */
+/** 案例命中列表：来源·类别·案号·日期 + 正文片段（命中词高亮，已看过的带徽标）。 */
 export default function CaseLibraryList({
   hits, query, loading, total, summary, onPick, onLoadMore,
 }: {
@@ -32,7 +32,10 @@ export default function CaseLibraryList({
           <button key={`${hit.source}-${hit.loc}`}
             className="statute-row statute-row-col"
             onClick={() => onPick(hit)}>
-            <span className="caselib-hit-title">{highlight(hit.title, query)}</span>
+            <span className="caselib-hit-title">
+              {hit.viewed && <span className="caselib-viewed">已看</span>}
+              {highlight(hit.title, query)}
+            </span>
             <span className="muted">
               {[hit.source, hit.category, hit.case_no, hit.date]
                 .filter(Boolean).join(" · ")}

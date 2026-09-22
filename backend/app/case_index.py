@@ -1,15 +1,16 @@
-"""案例库检索与文书化分节（只读）。
+"""案例库检索与文书化分节（只读，case_views 的阅读记录只读不改）。
 
 与 app/cases.py 分工：cases.py 负责 JSONL → SQLite 装载与单篇读取；
 本模块负责「关键词模糊检索」与「原文 → 文书小节」的展示层解析，
-不改表结构、不写回数据库，原文始终保留在 cases.text。
+不改表结构、不写回数据库，原文始终保留在 cases.text；阅读记录由 case_views 写入，
+本模块只读取它做「未看过优先 / 只看未看过 / 已看标识」。
 """
 from __future__ import annotations
 
 import json
 import re
 
-from app import case_facets
+from app import case_facets, case_views
 from app.cases import CASE_SOURCES
 
 #: 独占一行的裸小标题（最高法指导性案例等）
@@ -299,7 +300,7 @@ def _date_key(date: str) -> str:
     return re.sub(r"[./]", "-", (date or "").strip())
 
 
-def _sort_key(sort: str, terms: list[str]):
+def _base_sort_key(sort: str, terms: list[str]):
     """排序键：相关度（有 q）/ 最新 / 最早；无日期的排最后。"""
     if sort == "relevance" and terms:
         return lambda item: (-item["score"], not _date_key(item["date"]),
@@ -311,12 +312,20 @@ def _sort_key(sort: str, terms: list[str]):
                          item["source"], item["loc"])
 
 
+def _sort_key(sort: str, terms: list[str], viewed: set[tuple[str, str]]):
+    """排序键；`unviewed` = 未看过的一组在前，组内保持相关度/最新口径。"""
+    base = _base_sort_key("relevance" if (sort == "unviewed" and terms) else sort, terms)
+    if sort != "unviewed":
+        return base
+    return lambda item: (0 if (item["source"], item["loc"]) not in viewed else 1, base(item))
+
+
 def _rev(text: str) -> str:
     """日期降序：用码点取反的字符串参与升序排序，空值排最后。"""
     return "".join(chr(0x10FFFF - ord(c)) for c in text) if text else "\uffff"
 
 
-SORTS = ("relevance", "newest", "oldest")
+SORTS = ("relevance", "newest", "oldest", "unviewed")
 _COLS = "source, loc, title, category, case_no, keywords, date, url"
 
 
@@ -344,8 +353,9 @@ def _attach_text(conn, rows: list[dict]) -> None:
         row["text"] = found.get((row["source"], row["loc"]), "")
 
 
-def _matches(row: dict, terms: list[str], field: str | None,
-             crime: str | None, year: str | None) -> bool:
+def _matches(row: dict, terms: list[str], field: str | None, crime: str | None,
+             year: str | None, viewed_filter: str | None = None,
+             viewed: set[tuple[str, str]] = frozenset()) -> bool:
     if terms and not _hits(row, terms):
         return False
     if field and case_facets.field_of(row["keywords"]) != field:
@@ -353,6 +363,11 @@ def _matches(row: dict, terms: list[str], field: str | None,
     if crime and crime not in row["keywords"]:
         return False
     if year and case_facets.case_year(row["date"]) != year:
+        return False
+    key = (row["source"], row["loc"])
+    if viewed_filter == "no" and key in viewed:
+        return False
+    if viewed_filter == "yes" and key not in viewed:
         return False
     return True
 
@@ -365,24 +380,39 @@ def _item(row: dict, terms: list[str], with_text: bool) -> dict:
     return item
 
 
-def search(conn, q: str = "", source: str | None = None, field: str | None = None,
-           crime: str | None = None, year: str | None = None,
-           sort: str = "relevance", limit: int = 30, offset: int = 0) -> dict:
-    """案例检索/浏览：关键词（可空）+ 部门法/罪名/年份筛选 + 排序与分页。
-
-    返回 {items, total, offset, limit, sort, query, filters}；total 为筛选后的全量命中数。
-    """
+def _ordered(conn, q: str, source: str | None, field: str | None, crime: str | None,
+             year: str | None, sort: str,
+             viewed_filter: str | None
+             ) -> tuple[list[dict], list[str], str, set[tuple[str, str]]]:
+    """筛选 + 排序后的全量命中行（每行带 viewed 标记）；检索与相邻篇共用一套口径。"""
     terms = _terms(q)
     if sort == "relevance" and not terms:
         sort = "newest"
+    viewed = case_views.viewed_keys(conn)
     rows = _fetch(conn, source, with_text=bool(terms))
     for row in rows:
         row["keywords"] = _keywords(row["keywords"])
-    matched = [r for r in rows if _matches(r, terms, field, crime, year)]
+    matched = [r for r in rows
+               if _matches(r, terms, field, crime, year, viewed_filter, viewed)]
     if terms:
         for row in matched:
             row["score"] = _score(row, terms)
-    matched.sort(key=_sort_key(sort, terms))
+    matched.sort(key=_sort_key(sort, terms, viewed))
+    for row in matched:
+        row["viewed"] = (row["source"], row["loc"]) in viewed
+    return matched, terms, sort, viewed
+
+
+def search(conn, q: str = "", source: str | None = None, field: str | None = None,
+           crime: str | None = None, year: str | None = None,
+           sort: str = "relevance", limit: int = 30, offset: int = 0,
+           viewed_filter: str | None = None) -> dict:
+    """案例检索/浏览：关键词（可空）+ 部门法/罪名/年份/阅读状态筛选 + 排序与分页。
+
+    返回 {items, total, offset, limit, sort, query, filters}；total 为筛选后的全量命中数。
+    """
+    matched, terms, sort, _viewed = _ordered(conn, q, source, field, crime, year,
+                                             sort, viewed_filter)
     page = matched[offset:offset + limit]
     if not terms:
         _attach_text(conn, page)
@@ -394,7 +424,48 @@ def search(conn, q: str = "", source: str | None = None, field: str | None = Non
         "sort": sort,
         "query": (q or "").strip(),
         "filters": {"source": source or "", "field": field or "",
-                    "crime": crime or "", "year": year or ""},
+                    "crime": crime or "", "year": year or "",
+                    "viewed": viewed_filter or ""},
+    }
+
+
+def _neighbor(row: dict) -> dict:
+    """前后篇只回导航按钮需要的元信息。"""
+    return {k: row.get(k, "") for k in ("source", "loc", "title", "category",
+                                        "case_no", "date")}
+
+
+def neighbors(conn, lib: str, loc: str, q: str = "", source: str | None = None,
+              field: str | None = None, crime: str | None = None,
+              year: str | None = None, sort: str = "unviewed",
+              viewed_filter: str | None = None) -> dict:
+    """阅读导航的「上一篇 / 下一篇」与当前篇在阅读顺序里的位置。
+
+    打点在取相邻篇之前完成（见前端 CaseReader），所以：
+    - `next` 取自当前上下文的排序，且当前篇按「未看过」定位 —— 否则刚打完点就会
+      沉到「已看过」组末尾，下一篇永远是空的；
+    - `viewed=no` 筛选在相邻篇里忽略（打点后当前篇不再匹配，否则前后篇全空）；
+    - `prev` 走阅读轨迹（`case_views.previous_view`），因为「未看过优先」下
+      刚看过的那篇已经不在当前篇前面了。
+
+    当前篇不在命中集里（上下文与案例不匹配）时 index=-1、next 为空，
+    但 prev 仍按轨迹返回（从历史记录跳进来也能原路退回）。
+    """
+    matched, terms, sort, viewed = _ordered(
+        conn, q, source, field, crime,
+        year, sort, None if viewed_filter == "no" else viewed_filter)
+    key = (lib, loc)
+    if viewed_filter != "yes" and key in viewed:
+        matched = sorted(matched, key=_sort_key(sort, terms, viewed - {key}))
+    idx = next((i for i, r in enumerate(matched)
+                if r["source"] == lib and r["loc"] == loc), -1)
+    prev = case_views.previous_view(conn, lib, loc)
+    return {
+        "prev": _neighbor(prev) if prev else None,
+        "next": _neighbor(matched[idx + 1])
+                if 0 <= idx < len(matched) - 1 else None,
+        "index": idx,
+        "total": len(matched),
     }
 
 

@@ -83,6 +83,107 @@ def test_search_invalid_params_400(client):
     assert client.get("/api/case/search", params={"sort": "乱序"}).status_code == 400
     assert client.get("/api/case/search", params={"field": "宇宙法"}).status_code == 400
     assert client.get("/api/case/search", params={"year": "23"}).status_code == 400
+    assert client.get("/api/case/search", params={"viewed": "也许"}).status_code == 400
+
+
+def _view(client, source, loc):
+    return client.post("/api/case/view", json={"source": source, "loc": loc})
+
+
+def test_view_marks_case_viewed(client):
+    """打点幂等：首次 first_time，重复累计 views；列表回显 viewed。"""
+    assert client.get("/api/case/search", params={"q": "房屋"}
+                      ).json()["items"][0]["viewed"] is False
+    first = _view(client, "人民法院案例库", "case_1").json()
+    assert first["views"] == 1 and first["first_time"] is True
+    again = _view(client, "人民法院案例库", "case_1").json()
+    assert again["views"] == 2 and again["first_time"] is False
+    hit = client.get("/api/case/search", params={"q": "房屋"}).json()["items"][0]
+    assert hit["viewed"] is True
+
+
+def test_view_unknown_case_404(client):
+    assert _view(client, "人民法院案例库", "case_404").status_code == 404
+    assert _view(client, "不存在的库", "case_1").status_code == 404
+
+
+def test_unviewed_sort_and_viewed_filters(client):
+    """未看过优先：看过的沉底；viewed=no/yes 只看一侧。"""
+    _view(client, "人民法院案例库", "case_1")
+    body = client.get("/api/case/search", params={"sort": "unviewed"}).json()
+    assert body["sort"] == "unviewed"
+    assert [i["loc"] for i in body["items"]] == ["检例第39号", "case_1"]
+    fresh = client.get("/api/case/search", params={"viewed": "no"}).json()
+    assert [i["loc"] for i in fresh["items"]] == ["检例第39号"]
+    seen = client.get("/api/case/search", params={"viewed": "yes"}).json()
+    assert [i["loc"] for i in seen["items"]] == ["case_1"]
+    assert seen["filters"]["viewed"] == "yes"
+
+
+def test_neighbors_walks_browse_order(client):
+    head = client.get("/api/case/neighbors",
+                      params={"lib": "人民法院案例库", "loc": "case_1",
+                              "sort": "newest"}).json()
+    assert head["index"] == 0 and head["total"] == 2 and head["prev"] is None
+    assert head["next"]["loc"] == "检例第39号"
+    tail = client.get("/api/case/neighbors",
+                      params={"lib": "最高检指导性案例", "loc": "检例第39号",
+                              "sort": "newest"}).json()
+    assert tail["index"] == 1 and tail["next"] is None and tail["prev"] is None
+
+
+def test_neighbors_prev_follows_reading_trail(client):
+    """打点会把人挪到「已看过」组末尾，所以上一篇按阅读轨迹取。"""
+    _view(client, "人民法院案例库", "case_1")
+    _view(client, "最高检指导性案例", "检例第39号")
+    out = client.get("/api/case/neighbors",
+                     params={"lib": "最高检指导性案例", "loc": "检例第39号"}).json()
+    assert out["prev"]["loc"] == "case_1"
+    back = client.get("/api/case/neighbors",
+                      params={"lib": "人民法院案例库", "loc": "case_1"}).json()
+    assert back["prev"] is None  # 再往前没有读过别的
+    assert back["next"]["loc"] == "检例第39号"  # 但能顺着继续读
+
+
+def test_neighbors_respects_query_context(client):
+    """检索上下文里当前篇不命中 → 无下一篇（防御分支，前端隐藏按钮）。"""
+    body = client.get("/api/case/neighbors",
+                      params={"lib": "人民法院案例库", "loc": "case_1",
+                              "q": "操纵证券市场"}).json()
+    assert body["index"] == -1 and body["prev"] is None and body["next"] is None
+
+
+def test_neighbors_out_of_context_still_goes_back(client):
+    """从历史记录带着老筛选跳进来时，下一篇没有，但还能退回刚看过的那篇。"""
+    _view(client, "最高检指导性案例", "检例第39号")
+    body = client.get("/api/case/neighbors",
+                      params={"lib": "人民法院案例库", "loc": "case_1",
+                              "q": "操纵证券市场"}).json()
+    assert body["index"] == -1 and body["next"] is None
+    assert body["prev"]["loc"] == "检例第39号"
+
+
+def test_neighbors_invalid_params(client):
+    base = {"lib": "人民法院案例库", "loc": "case_1"}
+    assert client.get("/api/case/neighbors",
+                      params={**base, "sort": "乱序"}).status_code == 400
+    assert client.get("/api/case/neighbors",
+                      params={**base, "viewed": "也许"}).status_code == 400
+    assert client.get("/api/case/neighbors",
+                      params={"lib": "不存在的库", "loc": "case_1"}).status_code == 404
+
+
+def test_history_and_clear(client):
+    _view(client, "人民法院案例库", "case_1")
+    body = client.get("/api/case/history").json()
+    assert body["total"] == 1
+    assert body["items"][0]["loc"] == "case_1"
+    assert body["items"][0]["title"] == "房屋租赁合同纠纷案"
+    assert client.delete("/api/case/history").json()["cleared"] == 1
+    assert client.get("/api/case/history").json()["items"] == []
+    # 清空同时重置「看过」标记，列表回到未看过
+    assert client.get("/api/case/search", params={"q": "房屋"}
+                      ).json()["items"][0]["viewed"] is False
 
 
 def test_facets(client):

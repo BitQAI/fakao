@@ -759,6 +759,69 @@
   text-indent: 2em; text-align: justify;
 }
 .caselib-link { color: var(--primary); font-size: 12px; }
+.caselib-viewed {
+  display: inline-block; margin-right: 6px; padding: 1px 6px; vertical-align: 1px;
+  border: 1px solid var(--glass-border); border-radius: 999px;
+  background: var(--glass-soft); color: var(--muted);
+  font-size: 11px; font-weight: 500;
+}
+
+/* 阅读视图导航条：吸顶 + ←/→ 快捷键，不用滚回顶部就能切上一篇/下一篇 */
+.casereader-bar {
+  position: sticky; top: 0; z-index: 4;
+  display: flex; flex-direction: column; gap: 4px;
+  margin: -6px -14px 0; padding: 8px 14px 6px;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+}
+.casereader-row { display: flex; gap: 6px; align-items: center; }
+.casereader-btn {
+  flex: 1 1 0; min-width: 0; padding: 8px 6px; white-space: nowrap;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 10px; font-size: 13px; color: var(--ink); cursor: pointer;
+}
+.casereader-btn:active:not(:disabled) { transform: scale(0.97); }
+.casereader-btn:disabled { opacity: 0.4; cursor: default; }
+.casereader-btn-primary {
+  color: #fff; border-color: transparent;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+}
+.casereader-btn-primary:disabled {
+  color: var(--muted); background: var(--glass-soft);
+}
+.casereader-status {
+  margin: 0; text-align: center; font-size: 12px; color: var(--muted);
+}
+
+/* 阅读历史面板 */
+.casehist { display: flex; flex-direction: column; gap: 8px; }
+.casehist-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 10px 12px; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 12px; color: var(--ink);
+}
+.casehist-toggle.active { border-color: var(--primary); color: var(--primary); }
+.casehist-caret { flex: none; font-size: 12px; color: var(--muted); }
+.casehist-panel {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 14px;
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+}
+.casehist-row {
+  display: flex; flex-direction: column; gap: 4px; width: 100%;
+  padding: 9px 11px; text-align: left; cursor: pointer;
+  border: 1px solid var(--glass-border); background: var(--glass-soft);
+  border-radius: 10px; color: var(--ink);
+}
+.casehist-row:active {
+  border-color: var(--primary); background: rgba(37, 99, 235, 0.10);
+}
+.casehist-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
 
 /* 每日案例（微主观题） */
 .case-view { display: flex; flex-direction: column; gap: 10px; }
