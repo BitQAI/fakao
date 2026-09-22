@@ -6,7 +6,7 @@
 实施计划：`docs/superpowers/plans/2026-08-27-法考冲刺工具.md`
 AI 操作指南：`AGENTS.md`（供 AI 代理读取：条目生成/补缺/导入/音频/案例挂接/覆盖检查，以及后续拓展条目的方法论）
 条目数据规范：`docs/superpowers/specs/2026-09-22-条目数据格式化元数据规范.md`（新文件如何变成规范条目、真题批量导入、ID 段位与校验口径）
-案例库：`/cases` 页面（模糊检索 4 个来源库共 7172 篇 + 按正式文书分节阅读），设计见 `docs/superpowers/specs/2026-09-22-案例库模糊检索与文书化阅读-design.md`
+案例库：`/cases` 页面（4 个来源库共 7172 篇：部门法/罪名/年份筛选 + 关键词检索 + 按正式文书分节阅读），设计见 `docs/superpowers/specs/2026-09-22-案例库模糊检索与文书化阅读-design.md` 与 `docs/superpowers/specs/2026-09-22-案例库分面筛选与浏览-design.md`
 
 ## 部署（Ubuntu 22）
 

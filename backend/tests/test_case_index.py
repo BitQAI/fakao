@@ -132,8 +132,9 @@ def test_search_multi_term_is_and(conn):
         ("人民法院案例库", "case_2", "房屋买卖合同纠纷案", "参考案例", "",
          ["民事"], "2020.01.01", "", "买方跳单违约。"),
     ])
-    hits = case_index.search(conn, "房屋 租赁")
-    assert [h["loc"] for h in hits] == ["case_1"]
+    out = case_index.search(conn, "房屋 租赁")
+    assert [h["loc"] for h in out["items"]] == ["case_1"]
+    assert out["total"] == 1
 
 
 def test_search_title_hit_ranks_first(conn):
@@ -143,7 +144,7 @@ def test_search_title_hit_ranks_first(conn):
         ("人民法院案例库", "case_b", "居间合同跳单案", "参考案例", "", [],
          "2020.01.01", "", "正文无关。"),
     ])
-    hits = case_index.search(conn, "居间合同")
+    hits = case_index.search(conn, "居间合同")["items"]
     assert [h["loc"] for h in hits] == ["case_b", "case_a"]
     assert hits[0]["score"] > hits[1]["score"]
     assert "居间合同" in hits[1]["snippet"]  # 正文命中处居中截取
@@ -158,15 +159,68 @@ def test_search_source_filter_and_limit(conn):
         ("司法部案例库", "case_3", "戊与己租赁调解案", "调解", "", [],
          "2021.01.01", "", "租赁纠纷。"),
     ])
-    assert len(case_index.search(conn, "租赁")) == 3
-    hits = case_index.search(conn, "租赁", source="司法部案例库")
+    assert case_index.search(conn, "租赁")["total"] == 3
+    hits = case_index.search(conn, "租赁", source="司法部案例库")["items"]
     assert {h["loc"] for h in hits} == {"case_2", "case_3"}
-    assert len(case_index.search(conn, "租赁", limit=1)) == 1
+    one = case_index.search(conn, "租赁", limit=1)
+    assert len(one["items"]) == 1 and one["total"] == 3  # total 是全量命中数
 
 
-def test_search_empty_query(conn):
-    assert case_index.search(conn, "  ") == []
-    assert case_index.search(conn, "") == []
+def test_browse_without_query_returns_list(conn):
+    """空 q 是浏览模式：按日期倒序返回，不是空结果。"""
+    _seed(conn, [
+        ("人民法院案例库", "case_1", "甲案", "参考案例", "", ["民事"], "2019.01.01", "", "旧案正文。"),
+        ("人民法院案例库", "case_2", "乙案", "参考案例", "", ["民事"], "2024.01.01", "", "新案正文。"),
+    ])
+    out = case_index.search(conn, "  ")
+    assert out["total"] == 2 and out["sort"] == "newest"
+    assert [h["loc"] for h in out["items"]] == ["case_2", "case_1"]
+    assert all(h["snippet"] for h in out["items"])
+
+
+def test_filter_by_field_crime_year(conn):
+    _seed(conn, [
+        ("人民法院案例库", "case_1", "甲故意杀人案", "参考案例", "", ["刑事", "故意杀人罪"],
+         "2023.05.01", "", "正文。"),
+        ("人民法院案例库", "case_2", "乙盗窃案", "参考案例", "", ["刑事", "盗窃罪"],
+         "2021.05.01", "", "正文。"),
+        ("人民法院案例库", "case_3", "丙房屋租赁案", "参考案例", "", ["民事", "房屋租赁合同纠纷"],
+         "2023.06.01", "", "正文。"),
+        ("人民法院案例库", "case_4", "丁无标注案", "参考案例", "", ["其他标签"],
+         "2023.07.01", "", "正文。"),
+    ])
+    assert case_index.search(conn, field="刑事")["total"] == 2
+    assert case_index.search(conn, field="民事")["total"] == 1
+    assert case_index.search(conn, field="未标注")["total"] == 1
+    assert {h["loc"] for h in case_index.search(conn, crime="故意杀人罪")["items"]} == {"case_1"}
+    assert case_index.search(conn, year="2023")["total"] == 3
+    assert case_index.search(conn, field="刑事", year="2023")["total"] == 1
+    assert case_index.search(conn, field="刑事", crime="盗窃罪", year="2023")["total"] == 0
+
+
+def test_sort_newest_and_oldest(conn):
+    _seed(conn, [
+        ("人民法院案例库", "case_1", "甲案", "参考案例", "", [], "2019.01.01", "", "正文。"),
+        ("人民法院案例库", "case_2", "乙案", "参考案例", "", [], "2024-02-03", "", "正文。"),
+        ("人民法院案例库", "case_3", "丙案", "参考案例", "", [], "", "", "无日期。"),
+    ])
+    assert [h["loc"] for h in case_index.search(conn, sort="newest")["items"]] == \
+        ["case_2", "case_1", "case_3"]  # 无日期排最后
+    assert [h["loc"] for h in case_index.search(conn, sort="oldest")["items"]] == \
+        ["case_1", "case_2", "case_3"]
+    # 点号与横线混合格式也要按真实时间顺序
+    assert [h["loc"] for h in case_index.search(conn, year="2019")["items"]] == ["case_1"]
+
+
+def test_pagination_offset(conn):
+    _seed(conn, [
+        (("人民法院案例库"), f"case_{i}", f"第{i}案", "参考案例", "", ["民事"],
+         f"2020.01.{i:02d}", "", "正文。") for i in range(1, 6)
+    ])
+    out = case_index.search(conn, field="民事", sort="oldest", limit=2, offset=2)
+    assert out["total"] == 5
+    assert [h["loc"] for h in out["items"]] == ["case_3", "case_4"]
+    assert out["offset"] == 2
 
 
 def test_stats(conn):

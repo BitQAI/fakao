@@ -86,10 +86,15 @@
 .venv/bin/python scripts/match_cases.py --append-guiding   # 对已有 cases 条目追加指导性案例（领域门槛+上限 3）
 ```
 
-案例库检索与阅读（前端 `/cases`，只读，不改表）：`GET /api/case/search?q=&source=&limit=`
-（多词 AND，命中标题/案号/关键词/类别/正文）、`GET /api/case/detail?source=&loc=`
-（原文按裁判要旨/基本案情/裁判理由等分节）、`GET /api/case/stats`。
-注意：路径必须是单数 `/api/case/*`，复数 `/api/cases/{qid}` 是主观题接口。
+案例库检索与浏览（前端 `/cases`，只读，不改表）：
+
+- `GET /api/case/search?q=&source=&field=&crime=&year=&sort=&limit=&offset=`：`q` 可空
+  （空 = 纯浏览，默认按日期倒序）；`field` = 部门法（刑事/民事/行政/执行/国家赔偿/未标注，
+  取 `keywords[0]`）、`crime` = 罪名关键词、`year` = 4 位年份；`sort` ∈ relevance/newest/oldest；
+  返回 `{items,total,...}`，`total` 是筛选后全量命中数。
+- `GET /api/case/facets`：部门法/罪名/年份/来源库的取值与计数（单趟扫描聚合，17 ms）。
+- `GET /api/case/detail?source=&loc=`：原文按裁判要旨/基本案情/裁判理由等分节。
+- 注意：路径必须是单数 `/api/case/*`，复数 `/api/cases/{qid}` 是主观题接口。
 
 ### 3.5b 题库生成（客观题 / 数字判断题，2026-09-20 新增）
 
