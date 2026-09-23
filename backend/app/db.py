@@ -109,6 +109,18 @@ CREATE TABLE IF NOT EXISTS cases (
   PRIMARY KEY (source, loc)
 );
 
+-- 案例阅读记录：既当「看过」标记，也当阅读历史（last_viewed_at 倒序）
+-- 不建外键：案例库重装不应被阅读记录阻塞，悬空记录由 JOIN cases 自然过滤
+CREATE TABLE IF NOT EXISTS case_views (
+  source          TEXT NOT NULL,
+  loc             TEXT NOT NULL,
+  first_viewed_at TEXT NOT NULL,
+  last_viewed_at  TEXT NOT NULL,
+  views           INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (source, loc)
+);
+CREATE INDEX IF NOT EXISTS idx_case_views_last ON case_views(last_viewed_at);
+
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL

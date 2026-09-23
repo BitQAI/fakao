@@ -1,13 +1,21 @@
 "use client";
 import { useState } from "react";
-import type { CaseFacets, CaseFilters, CaseSort } from "@/lib/caseLibTypes";
+import { DEFAULT_CASE_SORT } from "@/lib/caseLibTypes";
+import type { CaseFacets, CaseFilters, CaseSort, CaseViewedFilter } from "@/lib/caseLibTypes";
 
 const CRIME_PREVIEW = 12;
 
 const SORTS: { key: CaseSort; label: string }[] = [
+  { key: "unviewed", label: "未看过优先" },
   { key: "relevance", label: "相关度" },
   { key: "newest", label: "最新" },
   { key: "oldest", label: "最早" },
+];
+
+const VIEWED: { key: CaseViewedFilter; label: string }[] = [
+  { key: "", label: "全部" },
+  { key: "no", label: "未看过" },
+  { key: "yes", label: "已看过" },
 ];
 
 /** 案例库筛选条：默认只占一行（部门法 / 年份 / 排序 / 高级筛选），
@@ -23,9 +31,10 @@ export default function CaseFilterBar({
 }) {
   const [open, setOpen] = useState(false);
   const [allCrimes, setAllCrimes] = useState(false);
-  const advanced = (filters.source ? 1 : 0) + (filters.crime ? 1 : 0);
+  const advanced = (filters.source ? 1 : 0) + (filters.crime ? 1 : 0)
+    + (filters.viewed ? 1 : 0);
   const dirty = advanced > 0 || filters.field || filters.year
-    || filters.sort !== "relevance";
+    || filters.sort !== DEFAULT_CASE_SORT;
 
   return (
     <div className="casebar-wrap">
@@ -52,6 +61,7 @@ export default function CaseFilterBar({
           {SORTS.map((s) => (
             <option key={s.key} value={s.key}>
               {s.label}{s.key === "relevance" && !hasQuery ? "（同最新）" : ""}
+              {s.key === "unviewed" && hasQuery ? "（组内按相关度）" : ""}
             </option>
           ))}
         </select>
@@ -93,6 +103,14 @@ export default function CaseFilterBar({
                 {allCrimes ? "收起" : `展开全部 ${facets?.crimes.length} 个`}
               </button>
             )}
+          </FacetRow>
+          <FacetRow label="阅读">
+            {VIEWED.map((v) => (
+              <Chip key={v.key || "all"} active={filters.viewed === v.key}
+                onClick={() => onChange({ viewed: v.key })}>
+                {v.label}
+              </Chip>
+            ))}
           </FacetRow>
           <div className="casebar-panel-foot">
             <button className="caselib-reset" disabled={!dirty} onClick={onReset}>

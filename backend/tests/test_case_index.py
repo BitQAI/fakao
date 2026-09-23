@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app import case_index, db
+from app import case_index, case_views, db
 from app.cases import CASE_SOURCES
 
 JCY_TEXT = """（检例第39号）
@@ -232,3 +232,73 @@ def test_stats(conn):
     assert out["total"] == 2
     assert {s["source"]: s["n"] for s in out["sources"]}["人民法院案例库"] == 1
     assert len(out["sources"]) == len(CASE_SOURCES)
+
+
+def _seed_browse(conn):
+    _seed(conn, [
+        ("人民法院案例库", "case_1", "甲案", "参考案例", "", ["民事"],
+         "2019.01.01", "", "旧案正文。"),
+        ("人民法院案例库", "case_2", "乙案", "参考案例", "", ["民事"],
+         "2024.01.01", "", "新案正文。"),
+        ("司法部案例库", "case_3", "丙案", "调解", "", ["民事"],
+         "2021.01.01", "", "中案正文。"),
+    ])
+
+
+def test_sort_unviewed_puts_viewed_last(conn):
+    """未看过优先：没读过的在前，读过的一组保持组内原序（最新在前）。"""
+    _seed_browse(conn)
+    case_views.mark_viewed(conn, "人民法院案例库", "case_1")
+    out = case_index.search(conn, sort="unviewed")
+    assert out["sort"] == "unviewed"
+    assert [h["loc"] for h in out["items"]] == ["case_2", "case_3", "case_1"]
+    assert [h["viewed"] for h in out["items"]] == [False, False, True]
+    # 检索态：未看过优先 + 组内按相关度
+    hits = case_index.search(conn, "正文", sort="unviewed")["items"]
+    assert [h["loc"] for h in hits] == ["case_2", "case_3", "case_1"]
+
+
+def test_search_viewed_filter(conn):
+    _seed_browse(conn)
+    case_views.mark_viewed(conn, "司法部案例库", "case_3")
+    assert {h["loc"] for h in case_index.search(conn, viewed_filter="no")["items"]} == \
+        {"case_1", "case_2"}
+    assert {h["loc"] for h in case_index.search(conn, viewed_filter="yes")["items"]} == \
+        {"case_3"}
+
+
+def test_neighbors_follow_search_order(conn):
+    """下一篇必须与同一上下文下 search 的顺序一致；无阅读轨迹时上一篇为空。"""
+    _seed_browse(conn)
+    ctx = {"field": "民事", "sort": "newest"}
+    items = case_index.search(conn, **ctx)["items"]
+    assert [h["loc"] for h in items] == ["case_2", "case_3", "case_1"]
+    for i, hit in enumerate(items):
+        out = case_index.neighbors(conn, hit["source"], hit["loc"], **ctx)
+        assert out["index"] == i and out["total"] == 3
+        assert out["prev"] is None  # 已经看过的那几篇才进轨迹
+        assert (out["next"] or {}).get("loc") == (
+            items[i + 1]["loc"] if i + 1 < len(items) else None)
+
+
+def test_neighbors_prev_is_reading_trail(conn):
+    """打完点后本篇会沉到最后：下一篇按「未看过」定位，上一篇走阅读轨迹。"""
+    _seed_browse(conn)
+    case_views.mark_viewed(conn, "人民法院案例库", "case_2")
+    case_views.mark_viewed(conn, "人民法院案例库", "case_3")
+    out = case_index.neighbors(conn, "人民法院案例库", "case_3", sort="newest")
+    assert out["prev"]["loc"] == "case_2"
+    assert out["next"] is None  # 未看过的只剩 case_1，但它排在 case_3 前面
+    back = case_index.neighbors(conn, "人民法院案例库", "case_2", sort="newest")
+    assert back["prev"] is None
+    assert back["next"]["loc"] == "case_3"
+
+
+def test_neighbors_viewed_filter_no_keeps_next(conn):
+    """只看未看过时，打完点本篇不再匹配筛选，但下一篇仍要能给出。"""
+    _seed_browse(conn)
+    case_views.mark_viewed(conn, "人民法院案例库", "case_2")
+    out = case_index.neighbors(conn, "人民法院案例库", "case_2", sort="newest",
+                               viewed_filter="no")
+    # case_2(2024) 当作未看过定位，下一篇是日期次新的 case_3(2021)
+    assert out["next"]["loc"] == "case_3"
