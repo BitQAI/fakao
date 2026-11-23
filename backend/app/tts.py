@@ -91,10 +91,15 @@ def ensure_mp3(entry_id: str, text: str, dry_run: bool = False,
 
     传入 conn 时，本次真生成了新音频才写 tts_assets 台账（命中缓存不写库，
     保持快路径零写）。条目与法条题卡共用该路径。
+
+    缓存查找顺序：先 .mp3（已转码压缩的历史缓存），再 .wav（旧缓存/新合成）。
+    这样批量把历史 wav 转成 mp3 后，命中率不受影响，也不会触发重新合成。
     """
+    for ext in (".mp3", ".wav"):
+        cached = config.AUDIO_DIR / f"{entry_id}{ext}"
+        if cached.exists() and cached.stat().st_size > 0:
+            return cached
     out = config.AUDIO_DIR / f"{entry_id}.wav"
-    if out.exists() and out.stat().st_size > 0:
-        return out
     if dry_run:
         return out
     config.AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -133,10 +138,19 @@ def text_hash(text: str) -> str:
 
 
 def audio_duration_sec(path: Path) -> float:
-    """读 wav 时长（秒）；非 wav / 损坏返回 0.0。"""
+    """读音频时长（秒）；优先 wave，非 wav（如 mp3）退回 ffprobe；失败返回 0.0。"""
     try:
         with contextlib.closing(wave.open(str(path))) as w:
             return round(w.getnframes() / w.getframerate(), 3)
+    except Exception:  # noqa: BLE001 - 非 wav 或损坏，改用 ffprobe
+        pass
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        return round(float(proc.stdout.strip()), 3)
     except Exception:  # noqa: BLE001 - 坏文件按 0 处理，由审计脚本判定
         return 0.0
 

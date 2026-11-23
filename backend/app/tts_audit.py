@@ -112,12 +112,16 @@ def audit_entry(conn, entry_id: str, text: str, *, wave_metrics: bool = True,
                 manifest: dict | None = None,
                 max_duration_sec: float = 0.0) -> list[Issue]:
     """单条目质检，返回 0~n 条 Issue。max_duration_sec>0 时超时记 over_length。"""
-    path = config.AUDIO_DIR / f"{entry_id}.wav"
+    # 缓存可能已转码为 .mp3（体积更小），优先匹配 mp3，其次 wav
+    path = next((p for p in (config.AUDIO_DIR / f"{entry_id}.mp3",
+                             config.AUDIO_DIR / f"{entry_id}.wav")
+                 if p.exists()),
+                config.AUDIO_DIR / f"{entry_id}.wav")
     normalized = normalize(text)
     issues: list[Issue] = []
     base = {"chars": len(normalized)}
     if not path.exists():
-        return [Issue(entry_id=entry_id, kind="missing", detail="无 wav", **base)]
+        return [Issue(entry_id=entry_id, kind="missing", detail="无音频", **base)]
     if path.stat().st_size == 0:
         return [Issue(entry_id=entry_id, kind="empty", detail="0 字节", **base)]
 
@@ -129,6 +133,9 @@ def audit_entry(conn, entry_id: str, text: str, *, wave_metrics: bool = True,
         issues.append(Issue(entry_id=entry_id, kind="stale",
                             detail="文本已改，音频早于文本", **base))
 
+    # mp3 无法用 wave 模块解析 PCM，跳过基于 PCM 的 RMS/静音分析（时长仍由 ffprobe 取得）
+    if wave_metrics and path.suffix.lower() != ".wav":
+        wave_metrics = False
     metrics = wav_metrics(path) if wave_metrics else {
         "duration_sec": tts.audio_duration_sec(path), "rms": 0.0,
         "lead_silence_sec": 0.0, "tail_silence_sec": 0.0}

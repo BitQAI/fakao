@@ -1,8 +1,9 @@
-version: '3.8'
-
 services:
   backend:
     image: fakaobitqaicom-backend:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
     container_name: fakao-backend
     restart: unless-stopped
     ports:
@@ -10,12 +11,18 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data:ro
+      - ./data:/app/data:rw
+      # 覆盖 tts.py 使其优先复用已转码的 .mp3（无需重建镜像）
+      - ./backend/app/tts.py:/app/app/tts.py:ro
+      - ./backend/app/tts_audit.py:/app/app/tts_audit.py:ro
     environment:
       - FAKAO_DATA_DIR=/app/data
 
   frontend:
     image: fakaobitqaicom-frontend:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
     container_name: fakao-frontend
     restart: unless-stopped
     ports:
